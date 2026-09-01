@@ -44,3 +44,6 @@ out/
 
 ### Worktrees ###
 .worktrees/
+
+### Build logs ###
+*.log
