@@ -3,6 +3,7 @@ package com.seaotter.triggerly.adapter.persistence
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.testcontainers.containers.MySQLContainer
+import org.testcontainers.elasticsearch.ElasticsearchContainer
 
 @SpringBootTest(classes = [PersistenceTestApplication::class])
 abstract class MySqlIntegrationTest {
@@ -18,5 +19,18 @@ abstract class MySqlIntegrationTest {
       withDatabaseName("triggerly")
       start()
     }
+
+    // PersistenceTestApplication은 ElasticsearchIntegrationTest와 공유하는 @SpringBootApplication이라
+    // Task 11에서 추가된 com.seaotter.triggerly.adapter.persistence.es 패키지의 ES 어댑터/리포지토리
+    // 빈들도 함께 컴포넌트 스캔 대상이 된다. MySQL 컨테이너만 띄우면 ES 커넥션이 없어 컨텍스트 로딩이
+    // 실패하므로(실측 확인), 위와 동일한 싱글턴 컨테이너 패턴으로 ES도 함께 띄운다.
+    @ServiceConnection
+    @JvmStatic
+    val elasticsearch: ElasticsearchContainer =
+      ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:9.4.2")
+        .apply {
+          withEnv("xpack.security.enabled", "false")
+          start()
+        }
   }
 }
