@@ -35,10 +35,10 @@ springdoc-openapi-webmvc-ui = { module = "org.springdoc:springdoc-openapi-starte
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-testcontainers" }
 spring-kafka-test = { module = "org.springframework.kafka:spring-kafka-test" }
-testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
-testcontainers-mysql = { module = "org.testcontainers:mysql" }
-testcontainers-elasticsearch = { module = "org.testcontainers:elasticsearch" }
-testcontainers-kafka = { module = "org.testcontainers:kafka" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter" }
+testcontainers-mysql = { module = "org.testcontainers:testcontainers-mysql" }
+testcontainers-elasticsearch = { module = "org.testcontainers:testcontainers-elasticsearch" }
+testcontainers-kafka = { module = "org.testcontainers:testcontainers-kafka" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
