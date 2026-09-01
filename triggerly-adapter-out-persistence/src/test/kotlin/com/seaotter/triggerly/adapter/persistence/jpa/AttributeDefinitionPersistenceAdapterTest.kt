@@ -15,13 +15,14 @@ class AttributeDefinitionPersistenceAdapterTest : MySqlIntegrationTest() {
 
   @Test
   fun `저장한 AttributeDefinition을 테넌트별로 조회할 수 있다`() {
+    val tenantId = "t-${UUID.randomUUID()}"
     adapter.save(
       AttributeDefinition(
-        id = UUID.randomUUID().toString(), tenantId = "t1", key = "amount",
+        id = UUID.randomUUID().toString(), tenantId = tenantId, key = "amount",
         displayName = "결제 금액", type = AttributeType.LONG, filterable = true,
       ),
     )
-    val list = adapter.findAll("t1")
+    val list = adapter.findAll(tenantId)
     assertEquals(1, list.size)
     assertEquals(AttributeType.LONG, list[0].type)
   }
