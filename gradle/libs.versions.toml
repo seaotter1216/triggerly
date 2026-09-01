@@ -25,6 +25,7 @@ spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-
 spring-boot-starter-data-elasticsearch = { module = "org.springframework.boot:spring-boot-starter-data-elasticsearch" }
 spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 spring-kafka = { module = "org.springframework.kafka:spring-kafka" }
+spring-boot-starter-kafka = { module = "org.springframework.boot:spring-boot-starter-kafka" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 flyway-core = { module = "org.flywaydb:flyway-core" }

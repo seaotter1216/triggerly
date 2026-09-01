@@ -1,0 +1,47 @@
+package com.seaotter.triggerly.adapter.messaging.kafka
+
+import com.seaotter.triggerly.application.port.RawEventMessage
+import org.apache.kafka.clients.admin.NewTopic
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.serialization.StringSerializer
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.kafka.autoconfigure.KafkaConnectionDetails
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.kafka.config.TopicBuilder
+import org.springframework.kafka.core.DefaultKafkaProducerFactory
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.kafka.core.ProducerFactory
+import org.springframework.kafka.support.serializer.JsonSerializer
+
+const val RAW_EVENTS_TOPIC = "triggerly.events.raw"
+
+@Configuration
+class KafkaProducerConfig(
+  private val kafkaProperties: KafkaProperties,
+  // Spring Boot 4.1에서 KafkaProperties.buildProducerProperties()가 무인자로 바뀌면서(브리프가 가정한
+  // buildProducerProperties(connectionDetails) 시그니처는 더 이상 존재하지 않음) bootstrap-servers를 더 이상
+  // 자동 병합하지 않는다. Boot 자체 자동구성(KafkaAutoConfiguration.kafkaProducerFactory)은 내부적으로
+  // KafkaConnectionDetails를 병합해 처리하지만, 우리가 직접 만드는 ProducerFactory 빈에는 적용되지 않으므로
+  // (Testcontainers @ServiceConnection이 등록한) KafkaConnectionDetails 빈을 주입받아 bootstrap-servers를
+  // 직접 덮어써야 한다(실측 확인: 병합 없이는 기본값 localhost:9092로 접속을 시도하다 타임아웃).
+  private val connectionDetails: KafkaConnectionDetails,
+) {
+
+  @Bean
+  fun rawEventsTopic(
+    @Value("\${triggerly.kafka.raw-events-topic.partitions:32}") partitions: Int,
+  ): NewTopic = TopicBuilder.name(RAW_EVENTS_TOPIC).partitions(partitions).replicas(1).build()
+
+  @Bean
+  fun rawEventProducerFactory(): ProducerFactory<String, RawEventMessage> {
+    val props = kafkaProperties.buildProducerProperties()
+    props[ProducerConfig.BOOTSTRAP_SERVERS_CONFIG] = connectionDetails.bootstrapServers
+    return DefaultKafkaProducerFactory(props, StringSerializer(), JsonSerializer())
+  }
+
+  @Bean
+  fun rawEventKafkaTemplate(producerFactory: ProducerFactory<String, RawEventMessage>): KafkaTemplate<String, RawEventMessage> =
+    KafkaTemplate(producerFactory)
+}
