@@ -19,6 +19,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
 jackson-datatype-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310" }
+spring-boot-jackson2 = { module = "org.springframework.boot:spring-boot-jackson2" }
 
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
 spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
@@ -30,6 +31,7 @@ spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 flyway-core = { module = "org.flywaydb:flyway-core" }
 flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
+spring-boot-starter-flyway = { module = "org.springframework.boot:spring-boot-starter-flyway" }
 mysql-connector-j = { module = "com.mysql:mysql-connector-j" }
 springdoc-openapi-webmvc-ui = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
 

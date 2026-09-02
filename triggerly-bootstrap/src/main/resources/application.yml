@@ -10,6 +10,14 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  # Spring Boot 4.1은 기본적으로 신규 Jackson 3(tools.jackson) 기반 컨버터를 HTTP 메시지 변환에
+  # 우선 사용한다. 이 프로젝트의 DTO/도메인 클래스는 전부 고전 Jackson 2(com.fasterxml.jackson)
+  # 애노테이션과 jackson-module-kotlin(2.x)을 전제로 작성되어 있어, Jackson 3 컨버터가 Kotlin
+  # data class의 생성자를 인식하지 못해 "no Creators" 역직렬화 예외가 발생함을 실측 확인
+  # (예: POST /api/v1/events의 EventRequestDto). 고전 Jackson2 컨버터를 사용하도록 명시한다.
+  http:
+    converters:
+      preferred-json-mapper: jackson2
 
 server:
   tomcat:
