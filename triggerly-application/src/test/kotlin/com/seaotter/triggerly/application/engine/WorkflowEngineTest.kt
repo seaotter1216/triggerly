@@ -202,4 +202,29 @@ class WorkflowEngineTest {
     assertEquals(WorkflowInstanceStatus.COMPLETED, resumed.status)
     assertEquals("n4", resumed.currentNodeId)
   }
+
+  @Test
+  fun `순환(cycle) 워크플로 정의는 스텝 상한을 넘으면 ERROR 상태로 종료된다`() {
+    val definition = WorkflowDefinition(
+      trigger = "LOGIN",
+      nodes = listOf(
+        Node.Trigger("n1", "LOGIN"),
+        Node.Condition("n2", ConditionExpression.Predicate("always", ConditionOperator.EQ, true)),
+        Node.Condition("n3", ConditionExpression.Predicate("always", ConditionOperator.EQ, true)),
+      ),
+      edges = listOf(
+        Edge("n1", "n2", EdgeRoute.Always),
+        Edge("n2", "n3", EdgeRoute.True),
+        Edge("n3", "n2", EdgeRoute.True),
+      ),
+    )
+    val (engine, _, _) = engine()
+    val instance = engine.start(
+      workflow(definition, "LOGIN"),
+      tenantId = "tenant-1",
+      memberId = "m1",
+      context = mapOf("always" to true),
+    )
+    assertEquals(WorkflowInstanceStatus.ERROR, instance.status)
+  }
 }

@@ -9,9 +9,9 @@ import java.time.LocalDateTime
 @Document(indexName = "event_log")
 class EventLogDocument(
   @Id var id: String,
-  var tenantId: String,
-  var eventCode: String,
+  @Field(type = FieldType.Keyword) var tenantId: String,
+  @Field(type = FieldType.Keyword) var eventCode: String,
   @Field(type = FieldType.Date) var occurredAt: LocalDateTime,
-  var memberId: String?,
+  @Field(type = FieldType.Keyword) var memberId: String?,
   @Field(type = FieldType.Object) var attributes: Map<String, Any?>?,
 )

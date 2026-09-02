@@ -1,6 +1,11 @@
 package com.seaotter.triggerly.application.usecase
 
 import com.seaotter.triggerly.application.port.WorkflowRepositoryPort
+import com.seaotter.triggerly.domain.ConditionExpression
+import com.seaotter.triggerly.domain.ConditionOperator
+import com.seaotter.triggerly.domain.Edge
+import com.seaotter.triggerly.domain.EdgeRoute
+import com.seaotter.triggerly.domain.Node
 import com.seaotter.triggerly.domain.Workflow
 import com.seaotter.triggerly.domain.WorkflowDefinition
 import com.seaotter.triggerly.domain.WorkflowStatus
@@ -9,6 +14,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import java.time.LocalDateTime
 
 class ManageWorkflowUseCaseTest {
@@ -29,5 +35,54 @@ class ManageWorkflowUseCaseTest {
 
     assertEquals(WorkflowStatus.ENABLED, result.status)
     verify { port.save(workflow) }
+  }
+
+  @Test
+  fun `create는 순환 워크플로 정의에 대해 예외를 던진다`() {
+    val port = mockk<WorkflowRepositoryPort>()
+    val definition = WorkflowDefinition(
+      trigger = "LOGIN",
+      nodes = listOf(
+        Node.Trigger("n1", "LOGIN"),
+        Node.Condition("n2", ConditionExpression.Predicate("always", ConditionOperator.EQ, true)),
+        Node.Condition("n3", ConditionExpression.Predicate("always", ConditionOperator.EQ, true)),
+      ),
+      edges = listOf(
+        Edge("n1", "n2", EdgeRoute.Always),
+        Edge("n2", "n3", EdgeRoute.True),
+        Edge("n3", "n2", EdgeRoute.True),
+      ),
+    )
+    val workflow = Workflow(
+      id = "wf-2", tenantId = "t1", triggerEventCode = "LOGIN",
+      definitionJson = definition,
+      status = WorkflowStatus.DRAFT, createdAt = LocalDateTime.now(), lastUpdatedAt = LocalDateTime.now(),
+    )
+
+    val useCase = ManageWorkflowUseCase(port)
+    assertFailsWith<IllegalArgumentException> { useCase.create(workflow) }
+  }
+
+  @Test
+  fun `create는 존재하지 않는 노드를 가리키는 엣지에 대해 예외를 던진다`() {
+    val port = mockk<WorkflowRepositoryPort>()
+    val definition = WorkflowDefinition(
+      trigger = "LOGIN",
+      nodes = listOf(
+        Node.Trigger("n1", "LOGIN"),
+        Node.End("n2"),
+      ),
+      edges = listOf(
+        Edge("n1", "does-not-exist", EdgeRoute.Always),
+      ),
+    )
+    val workflow = Workflow(
+      id = "wf-3", tenantId = "t1", triggerEventCode = "LOGIN",
+      definitionJson = definition,
+      status = WorkflowStatus.DRAFT, createdAt = LocalDateTime.now(), lastUpdatedAt = LocalDateTime.now(),
+    )
+
+    val useCase = ManageWorkflowUseCase(port)
+    assertFailsWith<IllegalArgumentException> { useCase.create(workflow) }
   }
 }

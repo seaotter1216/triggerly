@@ -67,7 +67,14 @@ class WorkflowEngine(
   private fun runFrom(instanceIn: WorkflowInstance, workflow: Workflow, startNodeId: String, context: Map<String, Any?>): WorkflowInstance {
     val instance = instanceIn
     var nodeId = startNodeId
+    val maxSteps = workflow.definitionJson.nodes.size * 4
+    var stepCount = 0
     while (true) {
+      if (++stepCount > maxSteps) {
+        instance.status = WorkflowInstanceStatus.ERROR
+        instance.currentNodeId = nodeId
+        return workflowInstanceRepositoryPort.save(instance)
+      }
       val node = workflow.definitionJson.nodes.first { it.id == nodeId }
       val execution = workflowExecutionRepositoryPort.save(
         WorkflowExecution(
