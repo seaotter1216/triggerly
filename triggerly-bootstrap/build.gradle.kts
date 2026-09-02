@@ -25,11 +25,3 @@ dependencies {
 	testImplementation(libs.spring.kafka.test)
 	testImplementation(libs.mockk)
 }
-
-tasks.named<Jar>("jar") {
-	enabled = false
-}
-
-tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
-	enabled = false
-}

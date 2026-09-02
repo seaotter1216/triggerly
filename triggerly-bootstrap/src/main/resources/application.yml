@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: triggerly-claude
+  threads:
+    virtual:
+      enabled: true
+  flyway:
+    locations: classpath:db/migration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+server:
+  tomcat:
+    max-swallow-size: 2MB
+
+triggerly:
+  kafka:
+    raw-events-topic:
+      partitions: 32
+    consumer:
+      concurrency: 8
+      max-poll-records: 500
+  ratelimit:
+    default-rps: 2000
+  async:
+    member-sync:
+      core-pool-size: 4
+      max-pool-size: 16
+      queue-capacity: 1000
+  scheduler:
+    timeout-poll-interval-ms: 10000
+    event-instance-retention-days: 30
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics
