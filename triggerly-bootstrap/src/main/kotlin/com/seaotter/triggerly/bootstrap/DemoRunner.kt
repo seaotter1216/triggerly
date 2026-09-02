@@ -48,10 +48,10 @@ class DemoRunner(
     log.info("--- 시나리오 3: 가입 환영 알림 (30초 뒤 알림톡) ---")
     client.sendEvent(tenantId, "SIGN_UP", "member-3")
 
-    log.info("--- 시나리오 4: 리뷰 유도 (5분 안에 리뷰 없으면 최근 30일 리뷰수 확인) ---")
+    log.info("--- 시나리오 4: 리뷰 유도 (2분 안에 리뷰 없으면 리뷰 작성 유도 푸시 알림) ---")
     client.sendEvent(tenantId, "PURCHASE", "member-4", mapOf("amount" to 30000))
 
-    log.info("=== 시드 완료. 콘솔에서 [DEMO ACTION] 로그를 지켜보세요 (최대 5분 소요) ===")
+    log.info("=== 시드 완료. 콘솔에서 [DEMO ACTION] 로그를 지켜보세요 (최대 2분 소요) ===")
   }
 
   private fun seedDefinitions() {
