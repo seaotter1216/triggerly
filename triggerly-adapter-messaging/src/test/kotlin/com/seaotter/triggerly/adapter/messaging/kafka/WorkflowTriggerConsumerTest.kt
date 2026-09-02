@@ -32,7 +32,7 @@ class WorkflowTriggerConsumerTest : KafkaIntegrationTest() {
   @Autowired lateinit var ingestEventUseCase: IngestEventUseCase
 
   @Test
-  fun `raw-events 토픽에 produce된 메시지는 IngestEventUseCase handle로 전달된다`() {
+  fun `raw-events 토픽에 produce된 메시지는 IngestEventUseCase handleBatch로 전달된다`() {
     val message = RawEventMessage(
       tenantId = "t1", eventCode = "LOGIN", externalMemberId = "ext-1",
       memberContext = null, attributes = null, occurredAt = LocalDateTime.now(),
@@ -41,6 +41,8 @@ class WorkflowTriggerConsumerTest : KafkaIntegrationTest() {
 
     Thread.sleep(Duration.ofSeconds(5).toMillis())
 
-    verify(timeout = 5000) { ingestEventUseCase.handle(match { it.eventCode == "LOGIN" && it.externalMemberId == "ext-1" }) }
+    verify(timeout = 5000) {
+      ingestEventUseCase.handleBatch(match { it.any { m -> m.eventCode == "LOGIN" && m.externalMemberId == "ext-1" } })
+    }
   }
 }

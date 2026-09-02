@@ -16,6 +16,17 @@ class EventInstanceMySqlStore(private val repository: EventInstanceJpaRepository
     return repository.save(entity).toDomain()
   }
 
+  fun saveAll(instances: Collection<EventInstance>): List<EventInstance> {
+    if (instances.isEmpty()) return emptyList()
+    val entities = instances.map {
+      EventInstanceEntity(
+        id = it.id, tenantId = it.tenantId, eventCode = it.eventCode,
+        occurredAt = it.occurredAt, memberId = it.memberId, attributes = it.attributes,
+      )
+    }
+    return repository.saveAll(entities).map { it.toDomain() }
+  }
+
   @Transactional
   fun deleteOlderThan(cutoff: LocalDateTime): Int = repository.deleteByOccurredAtBefore(cutoff)
 

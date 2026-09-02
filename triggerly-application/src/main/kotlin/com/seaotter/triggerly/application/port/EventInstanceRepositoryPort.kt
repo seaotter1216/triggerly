@@ -5,5 +5,6 @@ import java.time.LocalDateTime
 
 interface EventInstanceRepositoryPort {
   fun save(instance: EventInstance): EventInstance
+  fun saveAll(instances: Collection<EventInstance>): List<EventInstance>
   fun deleteOlderThan(cutoff: LocalDateTime): Int
 }

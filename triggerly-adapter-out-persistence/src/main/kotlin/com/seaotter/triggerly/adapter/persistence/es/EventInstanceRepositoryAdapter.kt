@@ -18,6 +18,13 @@ class EventInstanceRepositoryAdapter(
     return saved
   }
 
+  override fun saveAll(instances: Collection<EventInstance>): List<EventInstance> {
+    if (instances.isEmpty()) return emptyList()
+    val saved = mysqlStore.saveAll(instances)
+    esRepository.saveAll(saved.map { it.toDocument() })
+    return saved
+  }
+
   override fun deleteOlderThan(cutoff: LocalDateTime): Int = mysqlStore.deleteOlderThan(cutoff)
 
   private fun EventInstance.toDocument() = EventLogDocument(id, tenantId, eventCode, occurredAt, memberId, attributes)

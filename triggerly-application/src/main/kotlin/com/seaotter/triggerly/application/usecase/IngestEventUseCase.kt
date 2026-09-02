@@ -52,6 +52,79 @@ class IngestEventUseCase(
     }
   }
 
+  // Kafka 컨슈머(WorkflowTriggerConsumer)가 한 번의 poll로 끌어온 배치를 통째로 넘기는 진입점.
+  // 트래픽이 적을 때는 배치 크기가 1~2건이라 handle()과 사실상 동일하게 동작하고, 트래픽이 몰릴 때는
+  // 멤버 조회/저장과 EventInstance 저장을 (tenantId, eventCode) 단위로 묶어 DB 왕복 횟수를 줄인다.
+  // 워크플로 상태 전이(start/resumeOnMatch)는 이벤트마다 결과가 달라 배치화할 수 없으므로 그대로 순회한다.
+  fun handleBatch(messages: List<RawEventMessage>) {
+    val (timeoutMessages, regularMessages) = messages.partition { it.syntheticTimeoutForInstanceId != null }
+    timeoutMessages.forEach { handleTimeout(it.syntheticTimeoutForInstanceId!!) }
+    if (regularMessages.isEmpty()) return
+
+    val resolvedMembers = bulkResolveMembers(regularMessages)
+
+    eventInstanceRepositoryPort.saveAll(
+      regularMessages.map { message ->
+        val member = message.externalMemberId?.let { resolvedMembers[message.tenantId to it] }
+        EventInstance(
+          id = UUID.randomUUID().toString(),
+          tenantId = message.tenantId,
+          eventCode = message.eventCode,
+          occurredAt = message.occurredAt,
+          memberId = member?.id,
+          attributes = message.attributes,
+        )
+      },
+    )
+
+    val workflowCache = mutableMapOf<Pair<String, String>, List<Workflow>>()
+    regularMessages.forEach { message ->
+      val member = message.externalMemberId?.let { resolvedMembers[message.tenantId to it] }
+      val context = buildContext(message, member)
+
+      workflowCache.getOrPut(message.tenantId to message.eventCode) {
+        workflowRepositoryPort.findEnabledByTriggerEventCode(message.tenantId, message.eventCode)
+      }.forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context) }
+
+      if (member != null) {
+        waitingIndexPort.lookup(message.tenantId, message.eventCode, member.id)
+          .mapNotNull { workflowInstanceRepositoryPort.findById(it) }
+          .forEach { waiting ->
+            val workflow = workflowRepositoryPort.findById(message.tenantId, waiting.workflowId) ?: return@forEach
+            workflowEngine.resumeOnMatch(waiting, workflow, context)
+          }
+      }
+    }
+  }
+
+  // tenantId 단위로 findByExternalIds(IN절) 1회 + saveAll 1회로 멤버를 일괄 조회/갱신/생성한다.
+  // 같은 배치 안에 동일한 (tenantId, externalMemberId)가 여러 번 오면 컨텍스트를 순서대로 누적 적용하고
+  // 마지막 상태 1건만 저장한다.
+  private fun bulkResolveMembers(messages: List<RawEventMessage>): Map<Pair<String, String>, Member> {
+    val existingByKey = mutableMapOf<Pair<String, String>, Member>()
+    messages.filter { it.externalMemberId != null }.groupBy { it.tenantId }.forEach { (tenantId, msgs) ->
+      val externalIds = msgs.mapNotNull { it.externalMemberId }.toSet()
+      memberCommandPort.findByExternalIds(tenantId, externalIds)
+        .forEach { existingByKey[tenantId to it.externalMemberId] = it }
+    }
+
+    val toSave = LinkedHashMap<Pair<String, String>, Member>()
+    messages.forEach { message ->
+      val externalId = message.externalMemberId ?: return@forEach
+      val key = message.tenantId to externalId
+      val member = toSave[key] ?: existingByKey[key]
+      toSave[key] = if (member != null) {
+        message.memberContext?.let { applyContext(member, it) }
+        member
+      } else {
+        newMember(message.tenantId, externalId, message.memberContext)
+      }
+    }
+    if (toSave.isEmpty()) return emptyMap()
+
+    return memberCommandPort.saveAll(toSave.values).associateBy { it.tenantId to it.externalMemberId }
+  }
+
   private fun handleTimeout(instanceId: String) {
     val instance = workflowInstanceRepositoryPort.findById(instanceId) ?: return
     if (instance.status != WorkflowInstanceStatus.WAITING) return
@@ -66,28 +139,28 @@ class IngestEventUseCase(
       context?.let { applyContext(existing, it) }
       return memberCommandPort.save(existing)
     }
-    return memberCommandPort.save(
-      Member(
-        id = UUID.randomUUID().toString(),
-        tenantId = tenantId,
-        externalMemberId = externalMemberId,
-        name = context?.name,
-        email = context?.email,
-        telephone = context?.telephone,
-        devicePlatform = context?.devicePlatform,
-        gender = context?.gender,
-        birthday = context?.birthday,
-        status = context?.status ?: MemberStatus.ACTIVE,
-        joinedAt = context?.joinedAt ?: LocalDateTime.now(),
-        lastLoginAt = context?.lastLoginAt,
-        marketingSmsAgreed = context?.marketingSmsAgreed ?: false,
-        marketingPushAgreed = context?.marketingPushAgreed ?: false,
-        marketingEmailAgreed = context?.marketingEmailAgreed ?: false,
-        marketingKakaoAgreed = context?.marketingKakaoAgreed ?: false,
-        marketingAgreedAt = context?.marketingAgreedAt,
-      ),
-    )
+    return memberCommandPort.save(newMember(tenantId, externalMemberId, context))
   }
+
+  private fun newMember(tenantId: String, externalMemberId: String, context: MemberContext?) = Member(
+    id = UUID.randomUUID().toString(),
+    tenantId = tenantId,
+    externalMemberId = externalMemberId,
+    name = context?.name,
+    email = context?.email,
+    telephone = context?.telephone,
+    devicePlatform = context?.devicePlatform,
+    gender = context?.gender,
+    birthday = context?.birthday,
+    status = context?.status ?: MemberStatus.ACTIVE,
+    joinedAt = context?.joinedAt ?: LocalDateTime.now(),
+    lastLoginAt = context?.lastLoginAt,
+    marketingSmsAgreed = context?.marketingSmsAgreed ?: false,
+    marketingPushAgreed = context?.marketingPushAgreed ?: false,
+    marketingEmailAgreed = context?.marketingEmailAgreed ?: false,
+    marketingKakaoAgreed = context?.marketingKakaoAgreed ?: false,
+    marketingAgreedAt = context?.marketingAgreedAt,
+  )
 
   private fun applyContext(member: Member, context: MemberContext) {
     context.email?.let { member.email = it }
