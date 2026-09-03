@@ -8,6 +8,7 @@ import io.mockk.*
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import java.time.LocalDateTime
 
 class IngestEventUseCaseTest {
@@ -184,5 +185,43 @@ class IngestEventUseCaseTest {
     useCase.handleBatch(messages)
 
     verify(exactly = 1) { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "CART_ADD") }
+  }
+
+  @Test
+  fun `handleBatch는 이미 EventInstance로 저장된 eventId(재배달)를 만나면 엔진 실행 없이 스킵한다`() {
+    val redelivered = RawEventMessage(
+      tenantId = "t1", eventCode = "PURCHASE", externalMemberId = null,
+      memberContext = null, attributes = null, occurredAt = LocalDateTime.now(),
+      eventId = "evt-already-done",
+    )
+    every { eventInstanceRepositoryPort.findExistingIds(listOf("evt-already-done")) } returns setOf("evt-already-done")
+
+    useCase.handleBatch(listOf(redelivered))
+
+    verify(exactly = 0) { workflowRepositoryPort.findEnabledByTriggerEventCode(any(), any()) }
+    verify(exactly = 0) { eventInstanceRepositoryPort.saveAll(any()) }
+  }
+
+  @Test
+  fun `handleBatch는 배치 중간 레코드가 실패하면 그 인덱스를 담은 예외를 던지고, 그 전까지 성공한 건 먼저 저장한다`() {
+    val ok = RawEventMessage(
+      tenantId = "t1", eventCode = "LOGIN", externalMemberId = null,
+      memberContext = null, attributes = null, occurredAt = LocalDateTime.now(), eventId = "evt-ok",
+    )
+    val bad = RawEventMessage(
+      tenantId = "t1", eventCode = "SIGN_UP", externalMemberId = null,
+      memberContext = null, attributes = null, occurredAt = LocalDateTime.now(), eventId = "evt-bad",
+    )
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "LOGIN") } returns emptyList()
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "SIGN_UP") } throws RuntimeException("boom")
+    val savedSlot = slot<Collection<EventInstance>>()
+    every { eventInstanceRepositoryPort.saveAll(capture(savedSlot)) } answers { savedSlot.captured.toList() }
+
+    val ex = assertFailsWith<BatchEventProcessingException> { useCase.handleBatch(listOf(ok, bad)) }
+
+    assertEquals(1, ex.failedIndex)
+    assertEquals("evt-bad", ex.eventId)
+    assertEquals(1, savedSlot.captured.size)
+    assertEquals("evt-ok", savedSlot.captured.first().id)
   }
 }

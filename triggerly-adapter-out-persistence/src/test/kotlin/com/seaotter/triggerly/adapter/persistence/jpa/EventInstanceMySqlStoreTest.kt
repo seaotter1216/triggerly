@@ -43,4 +43,24 @@ class EventInstanceMySqlStoreTest : MySqlIntegrationTest() {
 
     assertEquals(1, deleted)
   }
+
+  @Test
+  fun `findExistingIds는 저장된 id만 골라 반환한다 (재시도 멱등 판별용)`() {
+    val saved = store.save(
+      EventInstance(
+        id = UUID.randomUUID().toString(), tenantId = "t1", eventCode = "PURCHASE",
+        occurredAt = LocalDateTime.now(),
+      ),
+    )
+    val notSavedId = UUID.randomUUID().toString()
+
+    val existingIds = store.findExistingIds(listOf(saved.id, notSavedId))
+
+    assertEquals(setOf(saved.id), existingIds)
+  }
+
+  @Test
+  fun `findExistingIds는 빈 컬렉션이면 조회 없이 빈 셋을 반환한다`() {
+    assertEquals(emptySet(), store.findExistingIds(emptyList()))
+  }
 }

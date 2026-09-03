@@ -2,6 +2,7 @@ package com.seaotter.triggerly.adapter.messaging.kafka
 
 import com.seaotter.triggerly.application.port.RawEventMessage
 import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.kafka.autoconfigure.KafkaConnectionDetails
@@ -11,8 +12,12 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory
 import org.springframework.kafka.core.ConsumerFactory
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer
+import org.springframework.kafka.listener.DefaultErrorHandler
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
 import org.springframework.kafka.support.serializer.JsonDeserializer
+import org.springframework.util.backoff.FixedBackOff
 
 @Configuration
 class KafkaConsumerConfig(
@@ -43,6 +48,7 @@ class KafkaConsumerConfig(
   @Bean
   fun rawEventBatchListenerContainerFactory(
     consumerFactory: ConsumerFactory<String, RawEventMessage>,
+    rawEventErrorHandler: DefaultErrorHandler,
   ): ConcurrentKafkaListenerContainerFactory<String, RawEventMessage> {
     val factory = ConcurrentKafkaListenerContainerFactory<String, RawEventMessage>()
     // Kotlin이 setConsumerFactory/setBatchListener를 프로퍼티(`factory.consumerFactory = ...`,
@@ -51,6 +57,26 @@ class KafkaConsumerConfig(
     // 에러) 세터 메서드를 직접 호출한다.
     factory.setConsumerFactory(consumerFactory)
     factory.setBatchListener(true)
+    factory.setCommonErrorHandler(rawEventErrorHandler)
     return factory
   }
+
+  // WorkflowTriggerConsumer가 BatchListenerFailedException(message, cause, index)을 던지면 이 핸들러가
+  // 받는다: index 이전 레코드는 이미 처리된 것으로 보고 offset을 커밋하고, index부터는 backOff 간격으로
+  // 재시도한다. backOff를 다 쓰고도 실패하면 rawEventDeadLetterRecoverer가 그 레코드 하나만 DLT로 보내고
+  // 넘어간다 - 그래야 poison message 하나 때문에 파티션 전체가 멈추지 않는다.
+  @Bean
+  fun rawEventErrorHandler(
+    rawEventDeadLetterRecoverer: DeadLetterPublishingRecoverer,
+    @Value("\${triggerly.kafka.consumer.retry.max-attempts:2}") maxRetryAttempts: Long,
+    @Value("\${triggerly.kafka.consumer.retry.backoff-ms:1000}") backoffMs: Long,
+  ): DefaultErrorHandler = DefaultErrorHandler(rawEventDeadLetterRecoverer, FixedBackOff(backoffMs, maxRetryAttempts))
+
+  // 실패한 원본 레코드를 별도 파티션 계산 없이 항상 DLT 토픽(단일 파티션, KafkaProducerConfig 참고)의
+  // 0번 파티션으로 보낸다. rawEventKafkaTemplate은 KafkaProducerConfig가 등록한 빈을 그대로 재사용한다.
+  @Bean
+  fun rawEventDeadLetterRecoverer(
+    rawEventKafkaTemplate: KafkaTemplate<String, RawEventMessage>,
+  ): DeadLetterPublishingRecoverer =
+    DeadLetterPublishingRecoverer(rawEventKafkaTemplate) { _, _ -> TopicPartition(RAW_EVENTS_DLT_TOPIC, 0) }
 }

@@ -27,5 +27,7 @@ class EventInstanceRepositoryAdapter(
 
   override fun deleteOlderThan(cutoff: LocalDateTime): Int = mysqlStore.deleteOlderThan(cutoff)
 
+  override fun findExistingIds(ids: Collection<String>): Set<String> = mysqlStore.findExistingIds(ids)
+
   private fun EventInstance.toDocument() = EventLogDocument(id, tenantId, eventCode, occurredAt, memberId, attributes)
 }

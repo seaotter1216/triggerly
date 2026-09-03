@@ -30,5 +30,10 @@ class EventInstanceMySqlStore(private val repository: EventInstanceJpaRepository
   @Transactional
   fun deleteOlderThan(cutoff: LocalDateTime): Int = repository.deleteByOccurredAtBefore(cutoff)
 
+  fun findExistingIds(ids: Collection<String>): Set<String> {
+    if (ids.isEmpty()) return emptySet()
+    return repository.findAllById(ids).map { it.id }.toSet()
+  }
+
   private fun EventInstanceEntity.toDomain() = EventInstance(id, tenantId, eventCode, occurredAt, memberId, attributes)
 }

@@ -1,10 +1,12 @@
 package com.seaotter.triggerly.adapter.messaging.kafka
 
 import com.seaotter.triggerly.application.port.RawEventMessage
+import com.seaotter.triggerly.application.usecase.BatchEventProcessingException
 import com.seaotter.triggerly.application.usecase.IngestEventUseCase
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.slf4j.LoggerFactory
 import org.springframework.kafka.annotation.KafkaListener
+import org.springframework.kafka.listener.BatchListenerFailedException
 import org.springframework.stereotype.Component
 
 @Component
@@ -18,11 +20,19 @@ class WorkflowTriggerConsumer(private val ingestEventUseCase: IngestEventUseCase
     concurrency = "\${triggerly.kafka.consumer.concurrency:8}",
     containerFactory = "rawEventBatchListenerContainerFactory",
   )
-  // handleBatch 하나로 배치 전체의 멤버/EventInstance DB 왕복을 묶는다. 대신 이 배치 안의 레코드 하나가
-  // 실패하면(예: DB 오류) 배치 전체가 실패로 잡히고, 이미 처리된 레코드까지 포함해 offset은 그대로
-  // 커밋된다 - 레코드 단위 격리를 배치 처리 효율과 맞바꾼 트레이드오프다.
   fun onMessages(records: List<ConsumerRecord<String, RawEventMessage>>) {
-    runCatching { ingestEventUseCase.handleBatch(records.map { it.value() }) }
-      .onFailure { log.error("배치 이벤트 처리 실패: size=${records.size}", it) }
+    try {
+      ingestEventUseCase.handleBatch(records.map { it.value() })
+    } catch (ex: BatchEventProcessingException) {
+      // handleBatch가 몇 번째 레코드에서 실패했는지 알려주면, 그 인덱스를 스프링 카프카 전용 예외로
+      // 감싸서 컨테이너에 전달한다. rawEventBatchListenerContainerFactory에 달린
+      // DefaultErrorHandler(+ FixedBackOff + DeadLetterPublishingRecoverer, KafkaConsumerConfig 참고)가
+      // 이 예외를 받아: 실패 인덱스 이전 레코드들의 offset은 커밋(재처리 안 됨), 실패한 레코드부터는
+      // 설정된 횟수만큼 재시도하다가 그래도 실패하면 DLT(raw-events.DLT) 토픽으로 보내고 다음으로 넘어간다.
+      log.error("배치 이벤트 처리 실패: index=${ex.failedIndex} eventId=${ex.eventId}", ex.cause ?: ex)
+      throw BatchListenerFailedException(ex.message ?: "배치 이벤트 처리 실패", ex.cause ?: ex, ex.failedIndex)
+    }
+    // 그 외 예외(예: 루프 진입 전 멤버 벌크 조회/저장 실패)는 그대로 던져 배치 전체가 재시도되게 둔다 -
+    // 이 시점에는 어떤 레코드도 실제로 처리(엔진 실행)되지 않았으므로 전체 재시도가 안전하다.
   }
 }

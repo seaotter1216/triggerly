@@ -46,4 +46,18 @@ class EventInstanceRepositoryAdapterTest : ElasticsearchIntegrationTest() {
 
     assertEquals(3, count)
   }
+
+  @Test
+  fun `findExistingIds는 saveAll로 저장한 id만 골라 반환한다`() {
+    val instances = listOf(
+      EventInstance(id = UUID.randomUUID().toString(), tenantId = "t1", eventCode = "LOGIN", occurredAt = LocalDateTime.now()),
+      EventInstance(id = UUID.randomUUID().toString(), tenantId = "t1", eventCode = "LOGIN", occurredAt = LocalDateTime.now()),
+    )
+    adapter.saveAll(instances)
+    val notSavedId = UUID.randomUUID().toString()
+
+    val existingIds = adapter.findExistingIds(instances.map { it.id } + notSavedId)
+
+    assertEquals(instances.map { it.id }.toSet(), existingIds)
+  }
 }

@@ -17,6 +17,10 @@ import org.springframework.kafka.support.serializer.JsonSerializer
 
 const val RAW_EVENTS_TOPIC = "triggerly.events.raw"
 
+// 재시도(FixedBackOff)를 다 써도 실패하는 레코드가 최종적으로 도착하는 곳. 파티션 병렬성이 필요 없는
+// 보관함일 뿐이라 파티션 1개로 충분하다 (KafkaConsumerConfig의 DeadLetterPublishingRecoverer가 사용).
+const val RAW_EVENTS_DLT_TOPIC = "$RAW_EVENTS_TOPIC.DLT"
+
 @Configuration
 class KafkaProducerConfig(
   private val kafkaProperties: KafkaProperties,
@@ -33,6 +37,9 @@ class KafkaProducerConfig(
   fun rawEventsTopic(
     @Value("\${triggerly.kafka.raw-events-topic.partitions:32}") partitions: Int,
   ): NewTopic = TopicBuilder.name(RAW_EVENTS_TOPIC).partitions(partitions).replicas(1).build()
+
+  @Bean
+  fun rawEventsDeadLetterTopic(): NewTopic = TopicBuilder.name(RAW_EVENTS_DLT_TOPIC).partitions(1).replicas(1).build()
 
   @Bean
   fun rawEventProducerFactory(): ProducerFactory<String, RawEventMessage> {
