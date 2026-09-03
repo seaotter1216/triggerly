@@ -50,12 +50,12 @@ class IngestEventUseCaseTest {
 
     val workflow = mockk<Workflow>()
     every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "SIGN_UP") } returns listOf(workflow)
-    every { workflowEngine.start(workflow, "t1", any(), any()) } returns mockk()
+    every { workflowEngine.start(workflow, "t1", any(), any(), any()) } returns mockk()
 
     useCase.handle(message)
 
     verify { eventInstanceRepositoryPort.save(match { it.eventCode == "SIGN_UP" && it.tenantId == "t1" }) }
-    verify { workflowEngine.start(workflow, "t1", savedMemberSlot.captured.id, any()) }
+    verify { workflowEngine.start(workflow, "t1", savedMemberSlot.captured.id, any(), message.eventId) }
     assertEquals("a@b.com", savedMemberSlot.captured.email)
   }
 

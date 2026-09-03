@@ -43,7 +43,7 @@ class IngestEventUseCase(
     val context = buildContext(message, member)
 
     workflowRepositoryPort.findEnabledByTriggerEventCode(message.tenantId, message.eventCode)
-      .forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context) }
+      .forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context, message.eventId) }
 
     if (member != null) {
       waitingIndexPort.lookup(message.tenantId, message.eventCode, member.id)
@@ -69,6 +69,9 @@ class IngestEventUseCase(
   //   3) 레코드 하나가 실패하면 그 인덱스까지는 이미 성공했으니 먼저 커밋(saveAll)해두고,
   //      실패한 인덱스를 BatchEventProcessingException으로 알려서 그 레코드부터만 재시도/DLT 대상이 되게 한다
   //      (WorkflowTriggerConsumer가 이걸 BatchListenerFailedException으로 바꿔 카프카 컨테이너에 전달한다).
+  //   4) 한 이벤트가 워크플로 여러 개를 트리거하는데 그중 하나가 실패해도, 앞서 이미 끝낸 워크플로들은
+  //      재시도 때 다시 실행되지 않는다 - WorkflowEngine.start()가 인스턴스 id를 eventId+workflowId로 고정해
+  //      이미 있는 인스턴스를 그대로 반환하기 때문(WorkflowEngine.kt 참고).
   fun handleBatch(messages: List<RawEventMessage>) {
     val regularMessages = messages.filter { it.syntheticTimeoutForInstanceId == null }
     val alreadyProcessedEventIds = eventInstanceRepositoryPort.findExistingIds(regularMessages.map { it.eventId })
@@ -96,7 +99,7 @@ class IngestEventUseCase(
 
         workflowCache.getOrPut(message.tenantId to message.eventCode) {
           workflowRepositoryPort.findEnabledByTriggerEventCode(message.tenantId, message.eventCode)
-        }.forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context) }
+        }.forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context, message.eventId) }
 
         if (member != null) {
           waitingIndexPort.lookup(message.tenantId, message.eventCode, member.id)

@@ -18,11 +18,21 @@ class WorkflowEngine(
   private val actionExecutor: ActionExecutor,
 ) {
 
-  fun start(workflow: Workflow, tenantId: String, memberId: String?, context: Map<String, Any?>): WorkflowInstance {
+  // eventId+workflowId로 인스턴스 id를 고정한다(랜덤 UUID 대신). 카프카 배치 재시도로 같은 이벤트에 대해
+  // start()가 다시 호출돼도 이미 존재하는 인스턴스를 그대로 반환해 워크플로가 중복 실행(쿠폰 중복 발급 등)되지
+  // 않는다 - EventInstance에 eventId로 멱등성을 건 것과 동일한 패턴. workflow_instance.id 컬럼이
+  // VARCHAR(36)(V1__init.sql)이라 "$eventId:${workflow.id}"를 그대로 못 쓰고, nameUUIDFromBytes로
+  // 같은 입력이면 항상 같은 36자 UUID가 나오게 해시한다. 단, 프로세스가 runFrom 도중(WAITING/COMPLETED/
+  // ERROR 어디에도 도달하기 전) 죽는 극단적인 경우엔 RUNNING 상태로 멈춘 인스턴스를 그대로 반환하고
+  // 나머지 노드는 재실행하지 않는다 - 자주 없는 케이스라 지금은 감수한다.
+  fun start(workflow: Workflow, tenantId: String, memberId: String?, context: Map<String, Any?>, eventId: String): WorkflowInstance {
+    val instanceId = UUID.nameUUIDFromBytes("$eventId:${workflow.id}".toByteArray()).toString()
+    workflowInstanceRepositoryPort.findById(instanceId)?.let { return it }
+
     val triggerNode = workflow.definitionJson.nodes.first { it is Node.Trigger } as Node.Trigger
     val instance = workflowInstanceRepositoryPort.save(
       WorkflowInstance(
-        id = UUID.randomUUID().toString(),
+        id = instanceId,
         workflowId = workflow.id,
         tenantId = tenantId,
         triggerEventCode = workflow.triggerEventCode,

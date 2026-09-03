@@ -94,9 +94,33 @@ class WorkflowEngineTest {
       tenantId = "tenant-1",
       memberId = "m1",
       context = mapOf("member.isBirthdayToday" to true),
+      eventId = "evt-1",
     )
     assertEquals(WorkflowInstanceStatus.COMPLETED, instance.status)
     assertEquals("n4", instance.currentNodeId)
+  }
+
+  @Test
+  fun `동일한 eventId로 다시 start하면(재시도) 이미 있는 인스턴스를 그대로 반환하고 재실행하지 않는다`() {
+    val definition = WorkflowDefinition(
+      trigger = "LOGIN",
+      nodes = listOf(
+        Node.Trigger("n1", "LOGIN"),
+        Node.Action("n2", ActionDefinition.IssueCoupon("BIRTHDAY10")),
+        Node.End("n3"),
+      ),
+      edges = listOf(
+        Edge("n1", "n2", EdgeRoute.Always),
+        Edge("n2", "n3", EdgeRoute.Always),
+      ),
+    )
+    val (engine, _, _) = engine()
+    val wf = workflow(definition, "LOGIN")
+    val first = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-retry")
+    val retried = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-retry")
+
+    assertEquals(first.id, retried.id)
+    assertEquals(WorkflowInstanceStatus.COMPLETED, retried.status)
   }
 
   @Test
@@ -125,7 +149,7 @@ class WorkflowEngineTest {
       FakeMemberEventStatsPort(emptyMap()),
       ActionExecutor(),
     )
-    val instance = engine.start(workflow(definition, "CART_ADD"), "tenant-1", "m1", emptyMap())
+    val instance = engine.start(workflow(definition, "CART_ADD"), "tenant-1", "m1", emptyMap(), eventId = "evt-2")
     assertEquals(WorkflowInstanceStatus.WAITING, instance.status)
     assertEquals("n2", instance.currentNodeId)
     assertEquals(listOf(instance.id), waitingIndex.lookup("tenant-1", "PURCHASE", "m1"))
@@ -168,7 +192,7 @@ class WorkflowEngineTest {
       ActionExecutor(),
     )
     val wf = workflow(definition, "PURCHASE")
-    val instance = engine.start(wf, "tenant-1", "m1", emptyMap())
+    val instance = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-3")
     assertEquals(WorkflowInstanceStatus.WAITING, instance.status)
 
     val resumed = engine.resumeOnTimeout(instance, wf)
@@ -194,7 +218,7 @@ class WorkflowEngineTest {
     )
     val (engine, _, _) = engine()
     val wf = workflow(definition, "SIGN_UP")
-    val instance = engine.start(wf, "tenant-1", "m1", emptyMap())
+    val instance = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-4")
     assertEquals(WorkflowInstanceStatus.WAITING, instance.status)
     assertNull(instance.waitingEventName)
 
@@ -224,6 +248,7 @@ class WorkflowEngineTest {
       tenantId = "tenant-1",
       memberId = "m1",
       context = mapOf("always" to true),
+      eventId = "evt-5",
     )
     assertEquals(WorkflowInstanceStatus.ERROR, instance.status)
   }
