@@ -30,6 +30,13 @@ triggerly:
     consumer:
       concurrency: 8
       max-poll-records: 500
+    action-dispatch-topic:
+      partitions: 16
+    action-dispatch:
+      consumer:
+        # raw-events 수집(concurrency 8)과 완전히 분리된 스레드 풀 - 프로바이더 API 호출 대기가
+        # 대부분이라 CPU 코어 수와 무관하게 넉넉히 잡는다.
+        concurrency: 16
   ratelimit:
     default-rps: 2000
   async:

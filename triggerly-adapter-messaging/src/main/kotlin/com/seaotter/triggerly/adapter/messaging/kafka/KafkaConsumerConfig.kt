@@ -1,5 +1,6 @@
 package com.seaotter.triggerly.adapter.messaging.kafka
 
+import com.seaotter.triggerly.application.port.ActionDispatchMessage
 import com.seaotter.triggerly.application.port.RawEventMessage
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.TopicPartition
@@ -79,4 +80,48 @@ class KafkaConsumerConfig(
     rawEventKafkaTemplate: KafkaTemplate<String, RawEventMessage>,
   ): DeadLetterPublishingRecoverer =
     DeadLetterPublishingRecoverer(rawEventKafkaTemplate) { _, _ -> TopicPartition(RAW_EVENTS_DLT_TOPIC, 0) }
+
+  // raw-events와 다르게 벌크 DB 쓰기로 묶을 게 없다(프로바이더 API 호출 1건당 1번) - 그래서 배치 리스너가
+  // 아니라 레코드 단위 리스너로 간다. DefaultErrorHandler를 레코드 단위 리스너에 쓰는 건 스프링 카프카의
+  // 원래 용법이라, raw-events처럼 BatchListenerFailedException으로 감싸는 코드 없이 예외를 그냥 던지기만
+  // 하면 재시도/DLT가 그대로 동작한다.
+  @Bean
+  fun actionDispatchConsumerFactory(): ConsumerFactory<String, ActionDispatchMessage> {
+    val props = kafkaProperties.buildConsumerProperties().toMutableMap()
+    props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = connectionDetails.bootstrapServers
+    props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = ErrorHandlingDeserializer::class.java
+    props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = ErrorHandlingDeserializer::class.java
+    props[ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS] = StringDeserializer::class.java
+    props[ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS] = JsonDeserializer::class.java
+    props[JsonDeserializer.TRUSTED_PACKAGES] = "com.seaotter.triggerly.application.port"
+    props[JsonDeserializer.VALUE_DEFAULT_TYPE] = ActionDispatchMessage::class.java.name
+    return DefaultKafkaConsumerFactory(props)
+  }
+
+  // raw-events 수집 컨슈머(concurrency=8, 파티션 32개 공유)와 완전히 분리된 그룹/스레드 풀. 프로바이더
+  // API가 느려져도 여기 스레드만 막히지 raw-events 파티션엔 영향이 없다 - I/O 대기가 대부분이라 CPU 코어
+  // 수와 무관하게 넉넉하게 잡아도 된다.
+  @Bean
+  fun actionDispatchListenerContainerFactory(
+    actionDispatchConsumerFactory: ConsumerFactory<String, ActionDispatchMessage>,
+    actionDispatchErrorHandler: DefaultErrorHandler,
+  ): ConcurrentKafkaListenerContainerFactory<String, ActionDispatchMessage> {
+    val factory = ConcurrentKafkaListenerContainerFactory<String, ActionDispatchMessage>()
+    factory.setConsumerFactory(actionDispatchConsumerFactory)
+    factory.setCommonErrorHandler(actionDispatchErrorHandler)
+    return factory
+  }
+
+  @Bean
+  fun actionDispatchErrorHandler(
+    actionDispatchDeadLetterRecoverer: DeadLetterPublishingRecoverer,
+    @Value("\${triggerly.kafka.action-dispatch.consumer.retry.max-attempts:2}") maxRetryAttempts: Long,
+    @Value("\${triggerly.kafka.action-dispatch.consumer.retry.backoff-ms:1000}") backoffMs: Long,
+  ): DefaultErrorHandler = DefaultErrorHandler(actionDispatchDeadLetterRecoverer, FixedBackOff(backoffMs, maxRetryAttempts))
+
+  @Bean
+  fun actionDispatchDeadLetterRecoverer(
+    actionDispatchKafkaTemplate: KafkaTemplate<String, ActionDispatchMessage>,
+  ): DeadLetterPublishingRecoverer =
+    DeadLetterPublishingRecoverer(actionDispatchKafkaTemplate) { _, _ -> TopicPartition(ACTION_DISPATCH_DLT_TOPIC, 0) }
 }

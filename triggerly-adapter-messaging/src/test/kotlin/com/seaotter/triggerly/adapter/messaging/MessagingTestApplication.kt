@@ -1,5 +1,6 @@
 package com.seaotter.triggerly.adapter.messaging
 
+import com.seaotter.triggerly.application.usecase.DispatchActionUseCase
 import com.seaotter.triggerly.application.usecase.IngestEventUseCase
 import io.mockk.mockk
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -19,4 +20,9 @@ class MessagingTestApplication {
   // 모호성 없이 그대로 사용됨).
   @Bean
   fun defaultIngestEventUseCase(): IngestEventUseCase = mockk(relaxed = true)
+
+  // ActionDispatchConsumer(@Component)도 같은 이유로 DispatchActionUseCase 빈이 필요하다 - 위와 동일한
+  // 안전망 패턴.
+  @Bean
+  fun defaultDispatchActionUseCase(): DispatchActionUseCase = mockk(relaxed = true)
 }

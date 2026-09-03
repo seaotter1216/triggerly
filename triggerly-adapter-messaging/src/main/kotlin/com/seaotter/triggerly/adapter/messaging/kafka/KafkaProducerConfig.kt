@@ -1,5 +1,6 @@
 package com.seaotter.triggerly.adapter.messaging.kafka
 
+import com.seaotter.triggerly.application.port.ActionDispatchMessage
 import com.seaotter.triggerly.application.port.RawEventMessage
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.producer.ProducerConfig
@@ -20,6 +21,13 @@ const val RAW_EVENTS_TOPIC = "triggerly.events.raw"
 // 재시도(FixedBackOff)를 다 써도 실패하는 레코드가 최종적으로 도착하는 곳. 파티션 병렬성이 필요 없는
 // 보관함일 뿐이라 파티션 1개로 충분하다 (KafkaConsumerConfig의 DeadLetterPublishingRecoverer가 사용).
 const val RAW_EVENTS_DLT_TOPIC = "$RAW_EVENTS_TOPIC.DLT"
+
+// Action 노드 실행을 raw-events 수집 컨슈머 스레드에서 떼어내기 위한 fire-and-forget 디스패치 토픽.
+// WorkflowEngine이 여기 발행만 하고 바로 다음 노드로 진행하면, ActionDispatchConsumer가 완전히 독립된
+// 컨슈머 그룹/스레드 풀에서 실제 프로바이더 호출을 한다 - 프로바이더가 느려져도 raw-events 파티션은
+// 영향받지 않는다.
+const val ACTION_DISPATCH_TOPIC = "triggerly.actions.dispatch"
+const val ACTION_DISPATCH_DLT_TOPIC = "$ACTION_DISPATCH_TOPIC.DLT"
 
 @Configuration
 class KafkaProducerConfig(
@@ -50,5 +58,24 @@ class KafkaProducerConfig(
 
   @Bean
   fun rawEventKafkaTemplate(producerFactory: ProducerFactory<String, RawEventMessage>): KafkaTemplate<String, RawEventMessage> =
+    KafkaTemplate(producerFactory)
+
+  @Bean
+  fun actionDispatchTopic(
+    @Value("\${triggerly.kafka.action-dispatch-topic.partitions:16}") partitions: Int,
+  ): NewTopic = TopicBuilder.name(ACTION_DISPATCH_TOPIC).partitions(partitions).replicas(1).build()
+
+  @Bean
+  fun actionDispatchDeadLetterTopic(): NewTopic = TopicBuilder.name(ACTION_DISPATCH_DLT_TOPIC).partitions(1).replicas(1).build()
+
+  @Bean
+  fun actionDispatchProducerFactory(): ProducerFactory<String, ActionDispatchMessage> {
+    val props = kafkaProperties.buildProducerProperties()
+    props[ProducerConfig.BOOTSTRAP_SERVERS_CONFIG] = connectionDetails.bootstrapServers
+    return DefaultKafkaProducerFactory(props, StringSerializer(), JsonSerializer())
+  }
+
+  @Bean
+  fun actionDispatchKafkaTemplate(producerFactory: ProducerFactory<String, ActionDispatchMessage>): KafkaTemplate<String, ActionDispatchMessage> =
     KafkaTemplate(producerFactory)
 }

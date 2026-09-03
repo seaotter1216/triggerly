@@ -121,6 +121,12 @@ sealed interface ActionDefinition {
   data class SendAlimTalk(val templateId: String) : ActionDefinition
 }
 
+fun ActionDefinition.describe(): String = when (this) {
+  is ActionDefinition.IssueCoupon -> "쿠폰 발급: couponId=$couponId"
+  is ActionDefinition.SendPush -> "푸시 발송: templateId=$templateId"
+  is ActionDefinition.SendAlimTalk -> "알림톡 발송: templateId=$templateId"
+}
+
 data class WaitEventDefinition(
   val eventCode: String,
   val timeout: DurationDto? = null,

@@ -1,5 +1,7 @@
 package com.seaotter.triggerly.application.engine
 
+import com.seaotter.triggerly.application.port.ActionDispatchMessage
+import com.seaotter.triggerly.application.port.ActionDispatchPort
 import com.seaotter.triggerly.application.port.MemberEventStatsPort
 import com.seaotter.triggerly.application.port.WaitingIndexPort
 import com.seaotter.triggerly.application.port.WorkflowExecutionRepositoryPort
@@ -15,7 +17,7 @@ class WorkflowEngine(
   private val workflowExecutionRepositoryPort: WorkflowExecutionRepositoryPort,
   private val waitingIndexPort: WaitingIndexPort,
   private val memberEventStatsPort: MemberEventStatsPort,
-  private val actionExecutor: ActionExecutor,
+  private val actionDispatchPort: ActionDispatchPort,
 ) {
 
   // eventId+workflowId로 인스턴스 id를 고정한다(랜덤 UUID 대신). 카프카 배치 재시도로 같은 이벤트에 대해
@@ -110,8 +112,22 @@ class WorkflowEngine(
         }
 
         is Node.Action -> {
-          val result = actionExecutor.execute(node.action)
-          complete(execution, result = result)
+          // fire-and-forget: 실제 프로바이더 호출은 별도 컨슈머(ActionDispatchConsumer)가 완전히 독립된
+          // 스레드 풀에서 처리한다 - 여기서 응답을 기다리면 프로바이더가 느려질 때 이 워크플로 엔진을 호출한
+          // 카프카 컨슈머 스레드(raw-events 수집)까지 막히기 때문. 그래서 다음 노드가 이 결과를 참조하지
+          // 않는다는 전제로, 발행만 하고 바로 다음 노드로 진행한다.
+          val dispatchId = UUID.nameUUIDFromBytes("${instance.id}:${node.id}".toByteArray()).toString()
+          actionDispatchPort.publish(
+            ActionDispatchMessage(
+              tenantId = instance.tenantId,
+              memberId = instance.memberId,
+              action = node.action,
+              workflowInstanceId = instance.id,
+              nodeId = node.id,
+              dispatchId = dispatchId,
+            ),
+          )
+          complete(execution, result = "dispatched(${node.action.describe()})")
           nodeId = nextNodeId(workflow, node.id, EdgeRoute.Always)
         }
 

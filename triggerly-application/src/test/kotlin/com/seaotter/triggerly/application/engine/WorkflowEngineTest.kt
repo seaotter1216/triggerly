@@ -1,5 +1,7 @@
 package com.seaotter.triggerly.application.engine
 
+import com.seaotter.triggerly.application.port.ActionDispatchMessage
+import com.seaotter.triggerly.application.port.ActionDispatchPort
 import com.seaotter.triggerly.application.port.MemberEventStatsPort
 import com.seaotter.triggerly.application.port.WaitingIndexPort
 import com.seaotter.triggerly.application.port.WorkflowExecutionRepositoryPort
@@ -46,6 +48,11 @@ private class FakeMemberEventStatsPort(private val counts: Map<String, Long>) : 
     counts["$memberId:$eventCode"] ?: 0L
 }
 
+private class FakeActionDispatchPort : ActionDispatchPort {
+  val published = mutableListOf<ActionDispatchMessage>()
+  override fun publish(message: ActionDispatchMessage) { published += message }
+}
+
 class WorkflowEngineTest {
 
   private fun workflow(definition: WorkflowDefinition, triggerEventCode: String = "TRIGGER") = Workflow(
@@ -58,17 +65,17 @@ class WorkflowEngineTest {
     lastUpdatedAt = LocalDateTime.now(),
   )
 
-  private fun engine(counts: Map<String, Long> = emptyMap()) = Triple(
-    WorkflowEngine(
+  private fun engine(counts: Map<String, Long> = emptyMap()): Pair<WorkflowEngine, FakeActionDispatchPort> {
+    val dispatchPort = FakeActionDispatchPort()
+    val engine = WorkflowEngine(
       FakeWorkflowInstanceRepository(),
       FakeWorkflowExecutionRepository(),
       FakeWaitingIndexPort(),
       FakeMemberEventStatsPort(counts),
-      ActionExecutor(),
-    ),
-    FakeWaitingIndexPort(),
-    counts,
-  )
+      dispatchPort,
+    )
+    return engine to dispatchPort
+  }
 
   @Test
   fun `시나리오 생일쿠폰 - Condition True 분기로 Action을 거쳐 End까지 진행한다`() {
@@ -88,7 +95,7 @@ class WorkflowEngineTest {
         Edge("n3", "n4", EdgeRoute.Always),
       ),
     )
-    val (engine, _, _) = engine()
+    val (engine, _) = engine()
     val instance = engine.start(
       workflow(definition, "LOGIN"),
       tenantId = "tenant-1",
@@ -114,13 +121,16 @@ class WorkflowEngineTest {
         Edge("n2", "n3", EdgeRoute.Always),
       ),
     )
-    val (engine, _, _) = engine()
+    val (engine, dispatchPort) = engine()
     val wf = workflow(definition, "LOGIN")
     val first = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-retry")
     val retried = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-retry")
 
     assertEquals(first.id, retried.id)
     assertEquals(WorkflowInstanceStatus.COMPLETED, retried.status)
+    // 재시도로 start()가 두 번 호출돼도 Action 노드는 다시 안 도니까, ActionDispatchMessage도 한 번만 나가야 한다
+    // (그래야 dispatch 토픽 자체의 재배달 문제와 별개로, 애초에 중복 발행조차 안 생긴다).
+    assertEquals(1, dispatchPort.published.size)
   }
 
   @Test
@@ -147,7 +157,7 @@ class WorkflowEngineTest {
       FakeWorkflowExecutionRepository(),
       waitingIndex,
       FakeMemberEventStatsPort(emptyMap()),
-      ActionExecutor(),
+      FakeActionDispatchPort(),
     )
     val instance = engine.start(workflow(definition, "CART_ADD"), "tenant-1", "m1", emptyMap(), eventId = "evt-2")
     assertEquals(WorkflowInstanceStatus.WAITING, instance.status)
@@ -189,7 +199,7 @@ class WorkflowEngineTest {
       FakeWorkflowExecutionRepository(),
       FakeWaitingIndexPort(),
       FakeMemberEventStatsPort(mapOf("m1:REVIEW_ADD" to 3L)),
-      ActionExecutor(),
+      FakeActionDispatchPort(),
     )
     val wf = workflow(definition, "PURCHASE")
     val instance = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-3")
@@ -216,7 +226,7 @@ class WorkflowEngineTest {
         Edge("n3", "n4", EdgeRoute.Always),
       ),
     )
-    val (engine, _, _) = engine()
+    val (engine, _) = engine()
     val wf = workflow(definition, "SIGN_UP")
     val instance = engine.start(wf, "tenant-1", "m1", emptyMap(), eventId = "evt-4")
     assertEquals(WorkflowInstanceStatus.WAITING, instance.status)
@@ -242,7 +252,7 @@ class WorkflowEngineTest {
         Edge("n3", "n2", EdgeRoute.True),
       ),
     )
-    val (engine, _, _) = engine()
+    val (engine, _) = engine()
     val instance = engine.start(
       workflow(definition, "LOGIN"),
       tenantId = "tenant-1",
