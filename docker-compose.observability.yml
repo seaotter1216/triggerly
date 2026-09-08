@@ -42,7 +42,10 @@ services:
       - "8090:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      # kafka:9092(PLAINTEXT)로 접속하면 첫 연결만 되고, 이후 브로커 메타데이터가 advertised.listeners의
+      # localhost:9092를 가리키면서 재연결이 컨테이너 자기자신으로 향해 타임아웃난다. 컨테이너 간 통신 전용인
+      # INTERNAL 리스너(kafka:29092)로 접속해야 한다.
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
     depends_on:
       - kafka
 
