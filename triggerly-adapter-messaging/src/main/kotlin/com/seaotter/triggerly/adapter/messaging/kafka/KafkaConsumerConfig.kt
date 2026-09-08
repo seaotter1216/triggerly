@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION") // JsonDeserializer 사용 이유는 KafkaProducerConfig의 RAW_EVENTS_TOPIC 상단 주석 참고
+
 package com.seaotter.triggerly.adapter.messaging.kafka
 
 import com.seaotter.triggerly.application.port.ActionDispatchMessage

@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION") // JsonSerializer 사용 이유는 아래 RAW_EVENTS_TOPIC 상단 주석 참고
+
 package com.seaotter.triggerly.adapter.messaging.kafka
 
 import com.seaotter.triggerly.application.port.ActionDispatchMessage
@@ -16,6 +18,12 @@ import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.core.ProducerFactory
 import org.springframework.kafka.support.serializer.JsonSerializer
 
+// JsonSerializer(Jackson2 기반)는 spring-kafka 4.0부터 @Deprecated(forRemoval=true) 상태다.
+// 대체품인 JacksonJsonSerializer(Jackson3 기반, tools.jackson.databind.json.JsonMapper 사용)로
+// 바꾸고 싶지만, 이 프로젝트의 RawEventMessage/ActionDispatchMessage가 Kotlin data class이고
+// Jackson3용 jackson-module-kotlin이 아직 Maven Central에 없어(실측 확인, 2026-09-08) 전환 시
+// application.yml에 남겨둔 것과 동일한 "no Creators" 역직렬화 예외가 재현될 가능성이 높다.
+// jackson-module-kotlin이 Jackson3를 지원하기 시작하면 그때 JacksonJsonSerializer로 교체할 것.
 const val RAW_EVENTS_TOPIC = "triggerly.events.raw"
 
 // 재시도(FixedBackOff)를 다 써도 실패하는 레코드가 최종적으로 도착하는 곳. 파티션 병렬성이 필요 없는
