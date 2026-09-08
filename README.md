@@ -41,7 +41,11 @@ sleep 20                      # ES/Kafka 초기화 대기
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 ```
-Grafana: http://localhost:3000, Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (Prometheus/Loki 데이터소스 자동 프로비저닝됨)
+- Prometheus: http://localhost:9090
+- Kafka UI: http://localhost:8090 — 토픽/메시지/컨슈머 그룹 조회, 파티션 증설
+- 로그: 앱을 `local` 프로필로 띄우면 `logs/triggerly.log`에도 기록되고, Promtail이 이를 Loki로
+  전송한다. Grafana Explore 탭에서 `job="triggerly-claude"`로 조회
 
 ## 모듈 구조
 

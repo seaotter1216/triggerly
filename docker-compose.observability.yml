@@ -8,5 +8,43 @@ services:
 
   grafana:
     image: grafana/grafana:11.1.0
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
     ports:
       - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+
+  # 로그 저장/질의 백엔드. Promtail 이 밀어넣은 로그를 라벨 기준으로 색인해서 LogQL 로 검색 가능하게 해준다.
+  loki:
+    image: grafana/loki:3.1.0
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # 로그 수집기. 앱이 컨테이너가 아니라 호스트에서 bootRun 으로 뜨기 때문에,
+  # ./logs 를 볼륨으로 공유 마운트해서 앱이 파일로 남긴 로그를 tail 한 뒤 Loki 로 push 한다.
+  promtail:
+    image: grafana/promtail:3.1.0
+    volumes:
+      - ./observability/promtail/config.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/triggerly:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  # Kafka 토픽/메시지/컨슈머 그룹 조회 및 파티션 증설 등 라이브 튜닝용 UI.
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.2.0
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+
+volumes:
+  grafana-data:

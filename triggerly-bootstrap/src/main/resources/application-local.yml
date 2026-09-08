@@ -11,3 +11,9 @@ spring:
       port: 6379
   kafka:
     bootstrap-servers: localhost:9092
+
+# 콘솔 출력은 그대로 유지되고, 파일에도 같이 남는다 (docker-compose.observability.yml 의
+# promtail 이 ./logs 를 마운트해서 이 파일을 읽어 Loki 로 보낸다).
+logging:
+  file:
+    name: logs/triggerly.log
