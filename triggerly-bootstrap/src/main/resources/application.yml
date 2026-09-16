@@ -46,6 +46,10 @@ triggerly:
       queue-capacity: 1000
   scheduler:
     timeout-poll-interval-ms: 10000
+    timeout-poll-batch-size-per-tenant: 200
+    timeout-poll-worker-pool-size: 20
+    timeout-poll-per-tenant-concurrency: 4
+    timeout-poll-lock-ttl-ms: 30000
     event-instance-retention-days: 30
 
 management:

@@ -6,7 +6,6 @@ import java.time.LocalDateTime
 interface WorkflowInstanceRepositoryPort {
   fun save(instance: WorkflowInstance): WorkflowInstance
   fun findById(id: String): WorkflowInstance?
-  fun findWaitingExpired(now: LocalDateTime, limit: Int = 200): List<WorkflowInstance>
 
   // IngestEventUseCase.handleBatch가 배치 안의 대기 인스턴스 후보들을 개별 findById 대신 IN절 1회로
   // 조회하기 위한 벌크 메서드 (Task 8 참고).

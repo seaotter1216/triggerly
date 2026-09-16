@@ -18,8 +18,6 @@ private class FakeWorkflowInstanceRepository : WorkflowInstanceRepositoryPort {
   val store = mutableMapOf<String, WorkflowInstance>()
   override fun save(instance: WorkflowInstance): WorkflowInstance { store[instance.id] = instance; return instance }
   override fun findById(id: String): WorkflowInstance? = store[id]
-  override fun findWaitingExpired(now: LocalDateTime, limit: Int) =
-    store.values.filter { it.status == WorkflowInstanceStatus.WAITING && it.waitingUntil?.isAfter(now) == false }
   override fun findAllById(ids: Collection<String>): List<WorkflowInstance> = ids.mapNotNull { store[it] }
   override fun findWaitingExpiredByTenant(tenantId: String, now: LocalDateTime, limit: Int) =
     store.values.filter { it.tenantId == tenantId && it.status == WorkflowInstanceStatus.WAITING && it.waitingUntil?.isAfter(now) == false }

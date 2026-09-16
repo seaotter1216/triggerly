@@ -15,27 +15,6 @@ class WorkflowInstancePersistenceAdapterTest : MySqlIntegrationTest() {
   lateinit var adapter: WorkflowInstancePersistenceAdapter
 
   @Test
-  fun `findWaitingExpired는 waitingUntil이 지난 WAITING 인스턴스만 반환한다`() {
-    val expired = adapter.save(
-      WorkflowInstance(
-        id = UUID.randomUUID().toString(), workflowId = "wf-1", tenantId = "t1", triggerEventCode = "CART_ADD",
-        version = 1, status = WorkflowInstanceStatus.WAITING, waitingUntil = LocalDateTime.now().minusMinutes(1),
-      ),
-    )
-    adapter.save(
-      WorkflowInstance(
-        id = UUID.randomUUID().toString(), workflowId = "wf-1", tenantId = "t1", triggerEventCode = "CART_ADD",
-        version = 1, status = WorkflowInstanceStatus.WAITING, waitingUntil = LocalDateTime.now().plusMinutes(10),
-      ),
-    )
-
-    val result = adapter.findWaitingExpired(LocalDateTime.now())
-
-    assertEquals(1, result.size)
-    assertEquals(expired.id, result[0].id)
-  }
-
-  @Test
   fun `findAllById는 주어진 id들만 조회하고 빈 컬렉션이면 빈 리스트를 반환한다`() {
     val a = adapter.save(
       WorkflowInstance(
