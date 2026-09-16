@@ -3,6 +3,7 @@ package com.seaotter.triggerly.application.usecase
 import com.seaotter.triggerly.application.engine.ActionExecutor
 import com.seaotter.triggerly.application.port.ActionDispatchMessage
 import com.seaotter.triggerly.application.port.DistributedLockPort
+import com.seaotter.triggerly.application.port.LockResult
 import com.seaotter.triggerly.domain.ActionDefinition
 import io.mockk.every
 import io.mockk.mockk
@@ -23,7 +24,7 @@ class DispatchActionUseCaseTest {
 
   @Test
   fun `dedup 락을 처음 선점하면 ActionExecutor를 호출한다`() {
-    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns true
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns LockResult.Acquired
 
     useCase.handle(message("dispatch-1"))
 
@@ -32,7 +33,7 @@ class DispatchActionUseCaseTest {
 
   @Test
   fun `dedup 락을 이미 선점한 상태면 ActionExecutor를 호출하지 않는다`() {
-    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns false
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns LockResult.AlreadyHeld
 
     useCase.handle(message("dispatch-1"))
 
@@ -40,8 +41,17 @@ class DispatchActionUseCaseTest {
   }
 
   @Test
+  fun `락 서비스 장애로 판단 불가면 스킵하지 않고 예외를 던져 재시도를 유도한다`() {
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns LockResult.Unavailable
+
+    assertFailsWith<IllegalStateException> { useCase.handle(message("dispatch-1")) }
+
+    verify(exactly = 0) { actionExecutor.execute(any()) }
+  }
+
+  @Test
   fun `실행이 실패하면 락을 해제하고 예외를 다시 던진다`() {
-    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns true
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns LockResult.Acquired
     every { actionExecutor.execute(any()) } throws RuntimeException("provider 500")
     every { distributedLockPort.release("dispatch-dedup:dispatch-1") } returns Unit
 
@@ -52,7 +62,7 @@ class DispatchActionUseCaseTest {
 
   @Test
   fun `실행이 성공하면 락을 해제하지 않는다`() {
-    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns true
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns LockResult.Acquired
 
     useCase.handle(message("dispatch-1"))
 

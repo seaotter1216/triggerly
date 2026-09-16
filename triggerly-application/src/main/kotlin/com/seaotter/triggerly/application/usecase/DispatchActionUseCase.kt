@@ -3,6 +3,7 @@ package com.seaotter.triggerly.application.usecase
 import com.seaotter.triggerly.application.engine.ActionExecutor
 import com.seaotter.triggerly.application.port.ActionDispatchMessage
 import com.seaotter.triggerly.application.port.DistributedLockPort
+import com.seaotter.triggerly.application.port.LockResult
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Duration
@@ -26,9 +27,18 @@ class DispatchActionUseCase(
 
   fun handle(message: ActionDispatchMessage) {
     val lockKey = "dispatch-dedup:${message.dispatchId}"
-    if (!distributedLockPort.tryLock(lockKey, DEDUP_TTL)) {
-      log.info("이미 처리된 디스패치 - 스킵: dispatchId={}", message.dispatchId)
-      return
+    when (distributedLockPort.tryLock(lockKey, DEDUP_TTL)) {
+      is LockResult.AlreadyHeld -> {
+        log.info("이미 처리된 디스패치 - 스킵: dispatchId={}", message.dispatchId)
+        return
+      }
+      // Redis 장애로 이미 처리 여부를 판단할 수 없는 상태다 - "처리 완료"로 간주해 조용히 스킵하면
+      // 장애 구간에 들어온 모든 액션(쿠폰 발급 등)이 예외/재시도/DLT 없이 유실된다. 그래서 "아직 처리
+      // 안 됨"으로 간주하고 예외를 던져 ActionDispatchConsumer의 재시도/DLT가 이 메시지를 다시 다루게
+      // 한다 - 장애가 길어지면 결국 DLT에 남아 최소한 눈에 보이게 된다.
+      is LockResult.Unavailable ->
+        throw IllegalStateException("락 서비스 장애로 디스패치 처리 여부를 판단할 수 없음: dispatchId=${message.dispatchId}")
+      is LockResult.Acquired -> {}
     }
     try {
       actionExecutor.execute(message.action)

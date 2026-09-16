@@ -2,6 +2,7 @@ package com.seaotter.triggerly.bootstrap
 
 import com.seaotter.triggerly.application.port.DistributedLockPort
 import com.seaotter.triggerly.application.port.EventPublisherPort
+import com.seaotter.triggerly.application.port.LockResult
 import com.seaotter.triggerly.application.port.WorkflowInstanceRepositoryPort
 import com.seaotter.triggerly.application.port.WorkflowRepositoryPort
 import com.seaotter.triggerly.domain.WorkflowInstance
@@ -48,14 +49,28 @@ class TenantAwareTimeoutPollerTest {
     every { workflowRepositoryPort.findDistinctTenantIds() } returns setOf("t1")
     every { workflowInstanceRepositoryPort.findWaitingExpiredByTenant("t1", any(), any()) } returns
       listOf(instance("i1", "t1"), instance("i2", "t1"))
-    every { distributedLockPort.tryLock("timeout-lock:i1", any()) } returns true
-    every { distributedLockPort.tryLock("timeout-lock:i2", any()) } returns false
+    every { distributedLockPort.tryLock("timeout-lock:i1", any()) } returns LockResult.Acquired
+    every { distributedLockPort.tryLock("timeout-lock:i2", any()) } returns LockResult.AlreadyHeld
     val sut = poller()
 
     sut.pollExpiredInstances()
 
     verify(exactly = 1) { eventPublisherPort.publish(match { it.syntheticTimeoutForInstanceId == "i1" }) }
     verify(exactly = 0) { eventPublisherPort.publish(match { it.syntheticTimeoutForInstanceId == "i2" }) }
+    sut.stop()
+  }
+
+  @Test
+  fun `락 서비스 장애(Unavailable)여도 다른 인스턴스와 동일하게 스킵하고 다음 틱을 기다린다`() {
+    every { workflowRepositoryPort.findDistinctTenantIds() } returns setOf("t1")
+    every { workflowInstanceRepositoryPort.findWaitingExpiredByTenant("t1", any(), any()) } returns
+      listOf(instance("i1", "t1"))
+    every { distributedLockPort.tryLock("timeout-lock:i1", any()) } returns LockResult.Unavailable
+    val sut = poller()
+
+    sut.pollExpiredInstances()
+
+    verify(exactly = 0) { eventPublisherPort.publish(any()) }
     sut.stop()
   }
 
@@ -71,7 +86,7 @@ class TenantAwareTimeoutPollerTest {
       maxObserved.updateAndGet { prev -> maxOf(prev, current) }
       Thread.sleep(20)
       inFlight.decrementAndGet()
-      true
+      LockResult.Acquired
     }
     val sut = poller(perTenantConcurrency = 4, poolSize = 20)
 

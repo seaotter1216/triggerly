@@ -2,6 +2,7 @@ package com.seaotter.triggerly.bootstrap
 
 import com.seaotter.triggerly.application.port.DistributedLockPort
 import com.seaotter.triggerly.application.port.EventPublisherPort
+import com.seaotter.triggerly.application.port.LockResult
 import com.seaotter.triggerly.application.port.RawEventMessage
 import com.seaotter.triggerly.application.port.WorkflowInstanceRepositoryPort
 import com.seaotter.triggerly.application.port.WorkflowRepositoryPort
@@ -91,8 +92,10 @@ class TenantAwareTimeoutPoller(
     val semaphore = perTenantSemaphores.computeIfAbsent(instance.tenantId) { Semaphore(perTenantConcurrency) }
     semaphore.acquire()
     try {
-      if (!distributedLockPort.tryLock("timeout-lock:${instance.id}", Duration.ofMillis(lockTtlMs))) {
-        return // 다른 인스턴스가 이미 처리 중 - 스킵(유실 아님, 처리 안 되면 다음 틱까지 그대로 남아있음)
+      // Acquired가 아니면(AlreadyHeld든 Unavailable이든) 스킵한다 - 이유가 뭐든 이 인스턴스는
+      // 만료된 채로 DB에 그대로 남아있으므로 다음 틱에 다시 스캔 대상이 된다. 유실이 아니다.
+      if (distributedLockPort.tryLock("timeout-lock:${instance.id}", Duration.ofMillis(lockTtlMs)) != LockResult.Acquired) {
+        return
       }
       log.info("타임아웃 감지: instanceId=${instance.id} tenantId=${instance.tenantId} node=${instance.currentNodeId}")
       eventPublisherPort.publish(
