@@ -25,4 +25,12 @@ class RedisDistributedLockAdapterTest : RedisIntegrationTest() {
     Thread.sleep(300)
     assertTrue(adapter.tryLock(key, Duration.ofMillis(200)))
   }
+
+  @Test
+  fun `release 이후에는 같은 키로 다시 tryLock할 수 있다`() {
+    val key = "lock:release:${System.nanoTime()}"
+    assertTrue(adapter.tryLock(key, Duration.ofSeconds(10)))
+    adapter.release(key)
+    assertTrue(adapter.tryLock(key, Duration.ofSeconds(10)))
+  }
 }

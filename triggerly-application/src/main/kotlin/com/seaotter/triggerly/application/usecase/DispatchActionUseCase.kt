@@ -25,11 +25,20 @@ class DispatchActionUseCase(
   private val log = LoggerFactory.getLogger(DispatchActionUseCase::class.java)
 
   fun handle(message: ActionDispatchMessage) {
-    if (!distributedLockPort.tryLock("dispatch-dedup:${message.dispatchId}", DEDUP_TTL)) {
+    val lockKey = "dispatch-dedup:${message.dispatchId}"
+    if (!distributedLockPort.tryLock(lockKey, DEDUP_TTL)) {
       log.info("이미 처리된 디스패치 - 스킵: dispatchId={}", message.dispatchId)
       return
     }
-    actionExecutor.execute(message.action)
+    try {
+      actionExecutor.execute(message.action)
+    } catch (e: Exception) {
+      // 실행이 실패하면 "아직 처리 안 됨"이 맞는 상태다 - 락을 풀어 다음 재시도(카프카 재배달)가
+      // 다시 tryLock에 성공하게 해준다. 그 후 원래 예외를 그대로 던져 ActionDispatchConsumer의
+      // 재시도/DLT 메커니즘이 정상 작동하게 한다.
+      distributedLockPort.release(lockKey)
+      throw e
+    }
   }
 
   companion object {

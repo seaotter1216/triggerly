@@ -8,6 +8,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 
 class DispatchActionUseCaseTest {
 
@@ -36,5 +37,25 @@ class DispatchActionUseCaseTest {
     useCase.handle(message("dispatch-1"))
 
     verify(exactly = 0) { actionExecutor.execute(any()) }
+  }
+
+  @Test
+  fun `실행이 실패하면 락을 해제하고 예외를 다시 던진다`() {
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns true
+    every { actionExecutor.execute(any()) } throws RuntimeException("provider 500")
+    every { distributedLockPort.release("dispatch-dedup:dispatch-1") } returns Unit
+
+    assertFailsWith<RuntimeException> { useCase.handle(message("dispatch-1")) }
+
+    verify(exactly = 1) { distributedLockPort.release("dispatch-dedup:dispatch-1") }
+  }
+
+  @Test
+  fun `실행이 성공하면 락을 해제하지 않는다`() {
+    every { distributedLockPort.tryLock("dispatch-dedup:dispatch-1", any()) } returns true
+
+    useCase.handle(message("dispatch-1"))
+
+    verify(exactly = 0) { distributedLockPort.release(any()) }
   }
 }

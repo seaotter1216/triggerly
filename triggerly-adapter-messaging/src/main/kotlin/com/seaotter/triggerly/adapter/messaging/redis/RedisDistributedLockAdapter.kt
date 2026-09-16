@@ -24,4 +24,15 @@ class RedisDistributedLockAdapter(
       log.warn("Redis 락 획득 실패(fail-open으로 처리): key={}", key, e)
       false
     }
+
+  // Redis 장애로 삭제가 실패해도 예외를 던지지 않는다 - release는 "다음 재시도를 허용하기 위한 정리"
+  // 목적이라, 여기서 실패해도 원래 예외(액션 실행 실패)를 가리면 안 되기 때문이다. 최악의 경우 TTL이
+  // 지나면 어차피 자연 해제된다.
+  override fun release(key: String) {
+    try {
+      redisTemplate.delete(key)
+    } catch (e: DataAccessException) {
+      log.warn("Redis 락 해제 실패(TTL 자연 만료에 위임): key={}", key, e)
+    }
+  }
 }
