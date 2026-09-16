@@ -60,11 +60,16 @@ class IngestEventUseCase(
   // 멤버 조회/저장을 (tenantId) 단위로 묶어 DB 왕복 횟수를 줄인다.
   // 워크플로 상태 전이(start/resumeOnMatch)는 이벤트마다 결과가 달라 배치화할 수 없으므로 그대로 순회한다.
   //
+  // [대기 인스턴스 N+1 제거] 배치를 순회하기 전에 먼저 각 메시지가 매칭할 수 있는 대기 인스턴스 후보
+  // id를 waitingIndexPort.lookup(Redis, 메시지당 유지)으로 모두 모으고, workflowInstanceRepositoryPort.
+  // findAllById로 그 전체를 IN절 1회에 조회한다. 본 순회에서는 이 사전 조회 결과만 참조하므로 메시지마다
+  // 개별 findById가 나가지 않는다.
+  //
   // [재시도/멱등 처리] 같은 배치가 실패해서 카프카가 다시 배달하더라도(레코드는 그대로, RawEventMessage.eventId도
   // 그대로) 이미 액션(쿠폰 발급 등)까지 실행된 이벤트를 또 실행하면 안 된다. 그래서:
   //   1) 배치 시작 시 eventId가 이미 EventInstance에 저장돼 있는 건("이전 시도에서 엔진 실행까지 끝난 이벤트")
   //      찾아서 통째로 스킵한다.
-  //   2) 이벤트 하나의 엔진 실행이 "성공적으로 끝난 뒤에만" EventInstance를 저장 대상에 담는다 — 실행 도중
+  //   2) 이벤트 하나의 엔진 실행이 "성공적으로 끝난 뒤에만" EventInstance를 저장 대상에 담는다 - 실행 도중
   //      실패하면 이 이벤트는 저장되지 않으므로, 재시도 때 다시 (1)에 안 걸리고 처음부터 재실행된다.
   //   3) 레코드 하나가 실패하면 그 인덱스까지는 이미 성공했으니 먼저 커밋(saveAll)해두고,
   //      실패한 인덱스를 BatchEventProcessingException으로 알려서 그 레코드부터만 재시도/DLT 대상이 되게 한다
@@ -72,11 +77,23 @@ class IngestEventUseCase(
   //   4) 한 이벤트가 워크플로 여러 개를 트리거하는데 그중 하나가 실패해도, 앞서 이미 끝낸 워크플로들은
   //      재시도 때 다시 실행되지 않는다 - WorkflowEngine.start()가 인스턴스 id를 eventId+workflowId로 고정해
   //      이미 있는 인스턴스를 그대로 반환하기 때문(WorkflowEngine.kt 참고).
+  //   5) 대기 인스턴스 사전 조회(findAllById 포함)는 어떤 레코드도 실제로 처리(엔진 실행)하지 않으므로,
+  //      여기서 예외가 나면(예: Redis/DB 장애) 배치 전체를 그대로 재시도해도 안전하다.
   fun handleBatch(messages: List<RawEventMessage>) {
     val regularMessages = messages.filter { it.syntheticTimeoutForInstanceId == null }
     val alreadyProcessedEventIds = eventInstanceRepositoryPort.findExistingIds(regularMessages.map { it.eventId })
     val pendingMessages = regularMessages.filterNot { it.eventId in alreadyProcessedEventIds }
     val resolvedMembers = bulkResolveMembers(pendingMessages)
+
+    val candidateInstanceIdsByMessage = HashMap<RawEventMessage, List<String>>()
+    messages.forEach { message ->
+      if (message.syntheticTimeoutForInstanceId != null) return@forEach
+      if (message.eventId in alreadyProcessedEventIds) return@forEach
+      val member = message.externalMemberId?.let { resolvedMembers[message.tenantId to it] } ?: return@forEach
+      candidateInstanceIdsByMessage[message] = waitingIndexPort.lookup(message.tenantId, message.eventCode, member.id)
+    }
+    val allCandidateIds = candidateInstanceIdsByMessage.values.flatten().distinct()
+    val waitingInstancesById = workflowInstanceRepositoryPort.findAllById(allCandidateIds).associateBy { it.id }
 
     val workflowCache = mutableMapOf<Pair<String, String>, List<Workflow>>()
     val processedInstances = mutableListOf<EventInstance>()
@@ -101,14 +118,12 @@ class IngestEventUseCase(
           workflowRepositoryPort.findEnabledByTriggerEventCode(message.tenantId, message.eventCode)
         }.forEach { workflow -> workflowEngine.start(workflow, message.tenantId, member?.id, context, message.eventId) }
 
-        if (member != null) {
-          waitingIndexPort.lookup(message.tenantId, message.eventCode, member.id)
-            .mapNotNull { workflowInstanceRepositoryPort.findById(it) }
-            .forEach { waiting ->
-              val workflow = workflowRepositoryPort.findById(message.tenantId, waiting.workflowId) ?: return@forEach
-              workflowEngine.resumeOnMatch(waiting, workflow, context)
-            }
-        }
+        candidateInstanceIdsByMessage[message].orEmpty()
+          .mapNotNull { waitingInstancesById[it] }
+          .forEach { waiting ->
+            val workflow = workflowRepositoryPort.findById(message.tenantId, waiting.workflowId) ?: return@forEach
+            workflowEngine.resumeOnMatch(waiting, workflow, context)
+          }
 
         processedInstances += EventInstance(
           id = message.eventId,
