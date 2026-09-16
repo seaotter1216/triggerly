@@ -224,4 +224,47 @@ class IngestEventUseCaseTest {
     assertEquals(1, savedSlot.captured.size)
     assertEquals("evt-ok", savedSlot.captured.first().id)
   }
+
+  @Test
+  fun `handleBatch는 기존 멤버의 컨텍스트가 실제로 변경되지 않으면 saveAll 대상에서 제외한다`() {
+    val existing = Member(id = "m1", tenantId = "t1", externalMemberId = "ext-1", email = "same@b.com")
+    val messages = listOf(
+      RawEventMessage(
+        tenantId = "t1", eventCode = "LOGIN", externalMemberId = "ext-1",
+        memberContext = MemberContext(tenantId = "t1", externalMemberId = "ext-1", email = "same@b.com"),
+        attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+    )
+    every { memberCommandPort.findByExternalIds("t1", setOf("ext-1")) } returns listOf(existing)
+    val savedInstancesSlot = slot<Collection<EventInstance>>()
+    every { eventInstanceRepositoryPort.saveAll(capture(savedInstancesSlot)) } answers { savedInstancesSlot.captured.toList() }
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "LOGIN") } returns emptyList()
+
+    useCase.handleBatch(messages)
+
+    verify(exactly = 0) { memberCommandPort.saveAll(any()) }
+  }
+
+  @Test
+  fun `handleBatch는 기존 멤버의 컨텍스트가 실제로 바뀌면 saveAll 대상에 포함한다`() {
+    val existing = Member(id = "m1", tenantId = "t1", externalMemberId = "ext-1", email = "old@b.com")
+    val messages = listOf(
+      RawEventMessage(
+        tenantId = "t1", eventCode = "LOGIN", externalMemberId = "ext-1",
+        memberContext = MemberContext(tenantId = "t1", externalMemberId = "ext-1", email = "new@b.com"),
+        attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+    )
+    every { memberCommandPort.findByExternalIds("t1", setOf("ext-1")) } returns listOf(existing)
+    val savedMembersSlot = slot<Collection<Member>>()
+    every { memberCommandPort.saveAll(capture(savedMembersSlot)) } answers { savedMembersSlot.captured.toList() }
+    val savedInstancesSlot = slot<Collection<EventInstance>>()
+    every { eventInstanceRepositoryPort.saveAll(capture(savedInstancesSlot)) } answers { savedInstancesSlot.captured.toList() }
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "LOGIN") } returns emptyList()
+
+    useCase.handleBatch(messages)
+
+    verify(exactly = 1) { memberCommandPort.saveAll(any()) }
+    assertEquals("new@b.com", savedMembersSlot.captured.first().email)
+  }
 }

@@ -129,7 +129,9 @@ class IngestEventUseCase(
 
   // tenantId 단위로 findByExternalIds(IN절) 1회 + saveAll 1회로 멤버를 일괄 조회/갱신/생성한다.
   // 같은 배치 안에 동일한 (tenantId, externalMemberId)가 여러 번 오면 컨텍스트를 순서대로 누적 적용하고
-  // 마지막 상태 1건만 저장한다.
+  // 마지막 상태 1건만 저장 대상으로 남긴다. saveAll에는 "신규 생성된 멤버"와 "이번 배치에서 실제로 필드값이
+  // 바뀐 기존 멤버"만 담는다 - applyContext가 실제 변경 여부를 반환하므로, 컨텍스트가 없거나(순수 트리거성
+  // 이벤트) 값이 이미 동일한 이벤트는 멤버 UPDATE 자체를 스킵해 쓰기 증폭을 없앤다.
   private fun bulkResolveMembers(messages: List<RawEventMessage>): Map<Pair<String, String>, Member> {
     val existingByKey = mutableMapOf<Pair<String, String>, Member>()
     messages.filter { it.externalMemberId != null }.groupBy { it.tenantId }.forEach { (tenantId, msgs) ->
@@ -138,21 +140,28 @@ class IngestEventUseCase(
         .forEach { existingByKey[tenantId to it.externalMemberId] = it }
     }
 
-    val toSave = LinkedHashMap<Pair<String, String>, Member>()
+    val resolved = LinkedHashMap<Pair<String, String>, Member>()
+    val toPersist = LinkedHashMap<Pair<String, String>, Member>()
     messages.forEach { message ->
       val externalId = message.externalMemberId ?: return@forEach
       val key = message.tenantId to externalId
-      val member = toSave[key] ?: existingByKey[key]
-      toSave[key] = if (member != null) {
-        message.memberContext?.let { applyContext(member, it) }
-        member
+      val member = resolved[key] ?: existingByKey[key]
+      if (member != null) {
+        val changed = message.memberContext?.let { applyContext(member, it) } ?: false
+        resolved[key] = member
+        // 같은 배치 안에서 이 멤버가 이미 한 번이라도 변경됐다면(toPersist에 이미 있음), 이번 이벤트가
+        // 변경이 없더라도 저장 대상에서 빠지면 안 된다 - "한 번이라도 바뀌면 이번 배치는 저장" 규칙.
+        if (changed || toPersist.containsKey(key)) toPersist[key] = member
       } else {
-        newMember(message.tenantId, externalId, message.memberContext)
+        val created = newMember(message.tenantId, externalId, message.memberContext)
+        resolved[key] = created
+        toPersist[key] = created
       }
     }
-    if (toSave.isEmpty()) return emptyMap()
+    if (toPersist.isEmpty()) return resolved
 
-    return memberCommandPort.saveAll(toSave.values).associateBy { it.tenantId to it.externalMemberId }
+    val saved = memberCommandPort.saveAll(toPersist.values).associateBy { it.tenantId to it.externalMemberId }
+    return resolved.mapValues { (key, member) -> saved[key] ?: member }
   }
 
   private fun handleTimeout(instanceId: String) {
@@ -192,13 +201,17 @@ class IngestEventUseCase(
     marketingAgreedAt = context?.marketingAgreedAt,
   )
 
-  private fun applyContext(member: Member, context: MemberContext) {
-    context.email?.let { member.email = it }
-    context.telephone?.let { member.telephone = it }
-    context.devicePlatform?.let { member.devicePlatform = it }
-    context.birthday?.let { member.birthday = it }
-    context.status?.let { member.status = it }
-    context.lastLoginAt?.let { member.lastLoginAt = it }
+  // 필드별로 실제 값이 달라질 때만 갱신하고, 하나라도 바뀌었으면 true를 반환한다 - bulkResolveMembers가
+  // 이 반환값으로 "이 멤버를 이번 배치에서 실제로 저장해야 하는지"를 판단한다.
+  private fun applyContext(member: Member, context: MemberContext): Boolean {
+    var changed = false
+    context.email?.let { if (member.email != it) { member.email = it; changed = true } }
+    context.telephone?.let { if (member.telephone != it) { member.telephone = it; changed = true } }
+    context.devicePlatform?.let { if (member.devicePlatform != it) { member.devicePlatform = it; changed = true } }
+    context.birthday?.let { if (member.birthday != it) { member.birthday = it; changed = true } }
+    context.status?.let { if (member.status != it) { member.status = it; changed = true } }
+    context.lastLoginAt?.let { if (member.lastLoginAt != it) { member.lastLoginAt = it; changed = true } }
+    return changed
   }
 
   private fun buildContext(message: RawEventMessage, member: Member?): Map<String, Any?> {
