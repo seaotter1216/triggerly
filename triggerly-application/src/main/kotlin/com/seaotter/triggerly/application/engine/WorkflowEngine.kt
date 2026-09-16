@@ -57,7 +57,7 @@ class WorkflowEngine(
 
     completeRunningExecution(instance, node.id)
     waitingIndexPort.remove(instance.tenantId, node.event.eventCode, instance.memberId ?: "", instance.id)
-    val nextNodeId = nextNodeId(workflow, node.id, EdgeRoute.Matched)
+    val nextNodeId = workflow.definitionJson.nextNodeId(node.id, EdgeRoute.Matched)
     return runFrom(instance, workflow, nextNodeId, eventContext)
   }
 
@@ -66,11 +66,11 @@ class WorkflowEngine(
       is Node.WaitForEvent -> {
         completeRunningExecution(instance, node.id)
         waitingIndexPort.remove(instance.tenantId, node.event.eventCode, instance.memberId ?: "", instance.id)
-        runFrom(instance, workflow, nextNodeId(workflow, node.id, EdgeRoute.Timeout), emptyMap())
+        runFrom(instance, workflow, workflow.definitionJson.nextNodeId(node.id, EdgeRoute.Timeout), emptyMap())
       }
       is Node.Delay -> {
         completeRunningExecution(instance, node.id)
-        runFrom(instance, workflow, nextNodeId(workflow, node.id, EdgeRoute.Always), emptyMap())
+        runFrom(instance, workflow, workflow.definitionJson.nextNodeId(node.id, EdgeRoute.Always), emptyMap())
       }
       else -> error("instance ${instance.id} is not waiting (currentNodeId=${instance.currentNodeId})")
     }
@@ -79,21 +79,21 @@ class WorkflowEngine(
   private fun runFrom(instanceIn: WorkflowInstance, workflow: Workflow, startNodeId: String, context: Map<String, Any?>): WorkflowInstance {
     val instance = instanceIn
     var nodeId = startNodeId
-    val maxSteps = workflow.definitionJson.nodes.size * 4
+    val maxSteps = workflow.definitionJson.maxExecutionSteps
     var stepCount = 0
     while (true) {
       if (++stepCount > maxSteps) {
-        instance.status = WorkflowInstanceStatus.ERROR
-        instance.currentNodeId = nodeId
+        instance.markError(nodeId)
         return workflowInstanceRepositoryPort.save(instance)
       }
-      val node = workflow.definitionJson.nodes.first { it.id == nodeId }
+      val node = workflow.definitionJson.nodeById(nodeId)
+        ?: error("워크플로 ${workflow.id}에 노드 $nodeId 가 존재하지 않습니다")
       val execution = workflowExecutionRepositoryPort.save(
         WorkflowExecution(
           id = UUID.randomUUID().toString(),
           workflowInstanceId = instance.id,
           nodeId = node.id,
-          nodeType = nodeTypeOf(node),
+          nodeType = node.nodeType,
           status = WorkflowExecutionStatus.RUNNING,
           startedAt = LocalDateTime.now(),
         ),
@@ -102,13 +102,13 @@ class WorkflowEngine(
       when (node) {
         is Node.Trigger -> {
           complete(execution)
-          nodeId = nextNodeId(workflow, node.id, EdgeRoute.Always)
+          nodeId = workflow.definitionJson.nextNodeId(node.id, EdgeRoute.Always)
         }
 
         is Node.Condition -> {
           val passed = ConditionEvaluator.evaluate(node.condition, context, statsResolverFor(instance.tenantId), instance.memberId)
           complete(execution, result = passed.toString())
-          nodeId = nextNodeId(workflow, node.id, if (passed) EdgeRoute.True else EdgeRoute.False)
+          nodeId = workflow.definitionJson.nextNodeId(node.id, if (passed) EdgeRoute.True else EdgeRoute.False)
         }
 
         is Node.Action -> {
@@ -128,31 +128,24 @@ class WorkflowEngine(
             ),
           )
           complete(execution, result = "dispatched(${node.action.describe()})")
-          nodeId = nextNodeId(workflow, node.id, EdgeRoute.Always)
+          nodeId = workflow.definitionJson.nextNodeId(node.id, EdgeRoute.Always)
         }
 
         is Node.WaitForEvent -> {
-          instance.status = WorkflowInstanceStatus.WAITING
-          instance.currentNodeId = node.id
-          instance.waitingEventName = node.event.eventCode
-          instance.waitingUntil = node.event.timeout?.let { LocalDateTime.now().plusNanos(it.toDuration().inWholeNanoseconds) }
+          instance.markWaitingForEvent(node)
           val saved = workflowInstanceRepositoryPort.save(instance)
           waitingIndexPort.register(saved.tenantId, node.event.eventCode, saved.memberId ?: "", saved.id)
           return saved
         }
 
         is Node.Delay -> {
-          instance.status = WorkflowInstanceStatus.WAITING
-          instance.currentNodeId = node.id
-          instance.waitingUntil = LocalDateTime.now().plusNanos(node.duration.toDuration().inWholeNanoseconds)
+          instance.markWaitingForDelay(node)
           return workflowInstanceRepositoryPort.save(instance)
         }
 
         is Node.End -> {
           complete(execution)
-          instance.status = WorkflowInstanceStatus.COMPLETED
-          instance.currentNodeId = node.id
-          instance.completedAt = LocalDateTime.now()
+          instance.markCompleted(node.id)
           return workflowInstanceRepositoryPort.save(instance)
         }
       }
@@ -172,20 +165,7 @@ class WorkflowEngine(
   }
 
   private fun currentNode(workflow: Workflow, instance: WorkflowInstance): Node? =
-    instance.currentNodeId?.let { id -> workflow.definitionJson.nodes.firstOrNull { it.id == id } }
-
-  private fun nextNodeId(workflow: Workflow, from: String, route: EdgeRoute): String =
-    workflow.definitionJson.edges.firstOrNull { it.from == from && it.route == route }?.to
-      ?: error("워크플로 ${workflow.id}에 노드 $from 에서 $route 로 가는 엣지가 없습니다")
-
-  private fun nodeTypeOf(node: Node): NodeType = when (node) {
-    is Node.Trigger -> NodeType.TRIGGER
-    is Node.Condition -> NodeType.CONDITION
-    is Node.Action -> NodeType.ACTION
-    is Node.WaitForEvent -> NodeType.WAIT_FOR_EVENT
-    is Node.Delay -> NodeType.DELAY
-    is Node.End -> NodeType.END
-  }
+    instance.currentNodeId?.let { id -> workflow.definitionJson.nodeById(id) }
 
   private fun statsResolverFor(tenantId: String): EventStatsResolver =
     EventStatsResolver { memberId, eventCode, withinDays -> memberEventStatsPort.countEvents(tenantId, memberId, eventCode, withinDays) }

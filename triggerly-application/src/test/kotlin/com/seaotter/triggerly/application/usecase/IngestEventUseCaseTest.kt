@@ -224,4 +224,86 @@ class IngestEventUseCaseTest {
     assertEquals(1, savedSlot.captured.size)
     assertEquals("evt-ok", savedSlot.captured.first().id)
   }
+
+  @Test
+  fun `handleBatch는 기존 멤버의 컨텍스트가 실제로 변경되지 않으면 saveAll 대상에서 제외한다`() {
+    val existing = Member(id = "m1", tenantId = "t1", externalMemberId = "ext-1", email = "same@b.com")
+    val messages = listOf(
+      RawEventMessage(
+        tenantId = "t1", eventCode = "LOGIN", externalMemberId = "ext-1",
+        memberContext = MemberContext(tenantId = "t1", externalMemberId = "ext-1", email = "same@b.com"),
+        attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+    )
+    every { memberCommandPort.findByExternalIds("t1", setOf("ext-1")) } returns listOf(existing)
+    val savedInstancesSlot = slot<Collection<EventInstance>>()
+    every { eventInstanceRepositoryPort.saveAll(capture(savedInstancesSlot)) } answers { savedInstancesSlot.captured.toList() }
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "LOGIN") } returns emptyList()
+
+    useCase.handleBatch(messages)
+
+    verify(exactly = 0) { memberCommandPort.saveAll(any()) }
+  }
+
+  @Test
+  fun `handleBatch는 기존 멤버의 컨텍스트가 실제로 바뀌면 saveAll 대상에 포함한다`() {
+    val existing = Member(id = "m1", tenantId = "t1", externalMemberId = "ext-1", email = "old@b.com")
+    val messages = listOf(
+      RawEventMessage(
+        tenantId = "t1", eventCode = "LOGIN", externalMemberId = "ext-1",
+        memberContext = MemberContext(tenantId = "t1", externalMemberId = "ext-1", email = "new@b.com"),
+        attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+    )
+    every { memberCommandPort.findByExternalIds("t1", setOf("ext-1")) } returns listOf(existing)
+    val savedMembersSlot = slot<Collection<Member>>()
+    every { memberCommandPort.saveAll(capture(savedMembersSlot)) } answers { savedMembersSlot.captured.toList() }
+    val savedInstancesSlot = slot<Collection<EventInstance>>()
+    every { eventInstanceRepositoryPort.saveAll(capture(savedInstancesSlot)) } answers { savedInstancesSlot.captured.toList() }
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "LOGIN") } returns emptyList()
+
+    useCase.handleBatch(messages)
+
+    verify(exactly = 1) { memberCommandPort.saveAll(any()) }
+    assertEquals("new@b.com", savedMembersSlot.captured.first().email)
+  }
+
+  @Test
+  fun `handleBatch는 배치 안에 대기 인스턴스 매칭 후보가 여러 건이어도 findAllById를 1번만 호출한다`() {
+    val member = Member(id = "m1", tenantId = "t1", externalMemberId = "ext-1")
+    val messages = listOf(
+      RawEventMessage(
+        tenantId = "t1", eventCode = "PAY_DONE", externalMemberId = "ext-1",
+        memberContext = null, attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+      RawEventMessage(
+        tenantId = "t1", eventCode = "PAY_DONE", externalMemberId = "ext-1",
+        memberContext = null, attributes = null, occurredAt = LocalDateTime.now(),
+      ),
+    )
+    every { memberCommandPort.findByExternalIds("t1", setOf("ext-1")) } returns listOf(member)
+    every { waitingIndexPort.lookup("t1", "PAY_DONE", "m1") } returns listOf("instance-1", "instance-2")
+    val waitingInstance1 = mockk<WorkflowInstance>()
+    val waitingInstance2 = mockk<WorkflowInstance>()
+    every { waitingInstance1.id } returns "instance-1"
+    every { waitingInstance2.id } returns "instance-2"
+    every { waitingInstance1.workflowId } returns "wf-1"
+    every { waitingInstance2.workflowId } returns "wf-1"
+    every { workflowInstanceRepositoryPort.findAllById(listOf("instance-1", "instance-2")) } returns
+      listOf(waitingInstance1, waitingInstance2)
+    val workflow = mockk<Workflow>()
+    every { workflowRepositoryPort.findById("t1", "wf-1") } returns workflow
+    every { workflowEngine.resumeOnMatch(any(), workflow, any()) } returns mockk()
+    every { workflowRepositoryPort.findEnabledByTriggerEventCode("t1", "PAY_DONE") } returns emptyList()
+    every { eventInstanceRepositoryPort.saveAll(any()) } answers { firstArg<Collection<EventInstance>>().toList() }
+
+    useCase.handleBatch(messages)
+
+    verify(exactly = 1) { workflowInstanceRepositoryPort.findAllById(listOf("instance-1", "instance-2")) }
+    verify(exactly = 0) { workflowInstanceRepositoryPort.findById(any()) }
+    // 메시지 2건이 동일한 (tenantId, eventCode, memberId)로 lookup하여 각각 동일한 후보 2건(instance-1,
+    // instance-2)을 매칭하므로 resumeOnMatch는 2(메시지) x 2(인스턴스) = 4회 호출된다. 이 테스트의 핵심은
+    // 그 호출 횟수가 아니라 findAllById가 후보 수와 무관하게 1번만 호출된다는 점(N+1 제거)이다.
+    verify(exactly = 4) { workflowEngine.resumeOnMatch(any(), workflow, any()) }
+  }
 }

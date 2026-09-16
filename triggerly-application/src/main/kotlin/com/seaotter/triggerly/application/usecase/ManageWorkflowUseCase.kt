@@ -1,5 +1,7 @@
 package com.seaotter.triggerly.application.usecase
 
+import com.seaotter.triggerly.application.port.CacheInvalidationPort
+import com.seaotter.triggerly.application.port.CacheInvalidationTopic
 import com.seaotter.triggerly.application.port.WorkflowRepositoryPort
 import com.seaotter.triggerly.domain.Node
 import com.seaotter.triggerly.domain.Workflow
@@ -9,10 +11,15 @@ import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 
 @Service
-class ManageWorkflowUseCase(private val port: WorkflowRepositoryPort) {
+class ManageWorkflowUseCase(
+  private val port: WorkflowRepositoryPort,
+  private val cacheInvalidationPort: CacheInvalidationPort,
+) {
   fun create(workflow: Workflow): Workflow {
     validate(workflow.definitionJson)
-    return port.save(workflow)
+    val saved = port.save(workflow)
+    cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "${saved.tenantId}:${saved.id}")
+    return saved
   }
   fun list(tenantId: String): List<Workflow> = port.findAll(tenantId)
   fun get(tenantId: String, id: String): Workflow? = port.findById(tenantId, id)
@@ -21,7 +28,9 @@ class ManageWorkflowUseCase(private val port: WorkflowRepositoryPort) {
     val workflow = port.findById(tenantId, id) ?: error("workflow not found: $id")
     workflow.status = WorkflowStatus.ENABLED
     workflow.lastUpdatedAt = LocalDateTime.now()
-    return port.save(workflow)
+    val saved = port.save(workflow)
+    cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "$tenantId:$id")
+    return saved
   }
 
   private fun validate(definition: WorkflowDefinition) {

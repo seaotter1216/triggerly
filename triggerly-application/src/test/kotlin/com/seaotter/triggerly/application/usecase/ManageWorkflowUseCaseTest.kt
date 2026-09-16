@@ -1,5 +1,7 @@
 package com.seaotter.triggerly.application.usecase
 
+import com.seaotter.triggerly.application.port.CacheInvalidationPort
+import com.seaotter.triggerly.application.port.CacheInvalidationTopic
 import com.seaotter.triggerly.application.port.WorkflowRepositoryPort
 import com.seaotter.triggerly.domain.ConditionExpression
 import com.seaotter.triggerly.domain.ConditionOperator
@@ -30,7 +32,8 @@ class ManageWorkflowUseCaseTest {
     every { port.findById("t1", "wf-1") } returns workflow
     every { port.save(any()) } answers { firstArg() }
 
-    val useCase = ManageWorkflowUseCase(port)
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    val useCase = ManageWorkflowUseCase(port, cacheInvalidationPort)
     val result = useCase.enable("t1", "wf-1")
 
     assertEquals(WorkflowStatus.ENABLED, result.status)
@@ -59,7 +62,8 @@ class ManageWorkflowUseCaseTest {
       status = WorkflowStatus.DRAFT, createdAt = LocalDateTime.now(), lastUpdatedAt = LocalDateTime.now(),
     )
 
-    val useCase = ManageWorkflowUseCase(port)
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    val useCase = ManageWorkflowUseCase(port, cacheInvalidationPort)
     assertFailsWith<IllegalArgumentException> { useCase.create(workflow) }
   }
 
@@ -82,7 +86,25 @@ class ManageWorkflowUseCaseTest {
       status = WorkflowStatus.DRAFT, createdAt = LocalDateTime.now(), lastUpdatedAt = LocalDateTime.now(),
     )
 
-    val useCase = ManageWorkflowUseCase(port)
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    val useCase = ManageWorkflowUseCase(port, cacheInvalidationPort)
     assertFailsWith<IllegalArgumentException> { useCase.create(workflow) }
+  }
+
+  @Test
+  fun `enable은 성공 후 WORKFLOW 캐시 무효화를 발행한다`() {
+    val port = mockk<WorkflowRepositoryPort>()
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    val workflow = Workflow(
+      id = "wf-1", tenantId = "t1", triggerEventCode = "LOGIN",
+      definitionJson = WorkflowDefinition("LOGIN", emptyList(), emptyList()),
+      status = WorkflowStatus.DRAFT, createdAt = LocalDateTime.now(), lastUpdatedAt = LocalDateTime.now(),
+    )
+    every { port.findById("t1", "wf-1") } returns workflow
+    every { port.save(any()) } answers { firstArg() }
+
+    ManageWorkflowUseCase(port, cacheInvalidationPort).enable("t1", "wf-1")
+
+    verify(exactly = 1) { cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "t1:wf-1") }
   }
 }

@@ -16,9 +16,15 @@ class WorkflowInstancePersistenceAdapter(
 
   override fun findById(id: String): WorkflowInstance? = repository.findById(id).orElse(null)?.toDomain()
 
-  override fun findWaitingExpired(now: LocalDateTime, limit: Int): List<WorkflowInstance> =
-    repository.findAllByStatusAndWaitingUntilLessThanEqual(WorkflowInstanceStatus.WAITING.name, now, PageRequest.of(0, limit))
-      .map { it.toDomain() }
+  override fun findAllById(ids: Collection<String>): List<WorkflowInstance> {
+    if (ids.isEmpty()) return emptyList()
+    return repository.findAllById(ids).map { it.toDomain() }
+  }
+
+  override fun findWaitingExpiredByTenant(tenantId: String, now: LocalDateTime, limit: Int): List<WorkflowInstance> =
+    repository.findAllByTenantIdAndStatusAndWaitingUntilLessThanEqualOrderByWaitingUntilAsc(
+      tenantId, WorkflowInstanceStatus.WAITING.name, now, PageRequest.of(0, limit),
+    ).map { it.toDomain() }
 
   private fun WorkflowInstance.toEntity() = WorkflowInstanceEntity(
     id = id, workflowId = workflowId, tenantId = tenantId, triggerEventCode = triggerEventCode, version = version,

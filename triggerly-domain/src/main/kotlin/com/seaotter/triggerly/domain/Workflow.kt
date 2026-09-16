@@ -1,5 +1,6 @@
 package com.seaotter.triggerly.domain
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
 import java.time.LocalDateTime
@@ -24,6 +25,7 @@ class Workflow(
 
 enum class WorkflowStatus { DRAFT, ENABLED, DISABLED, ARCHIVED }
 
+// 정의된 워크플로가 실행될 때마다 생기는 인스턴스
 class WorkflowInstance(
   val id: String,
   val workflowId: String,
@@ -37,10 +39,35 @@ class WorkflowInstance(
   var waitingUntil: LocalDateTime? = null,
   var startedAt: LocalDateTime? = null,
   var completedAt: LocalDateTime? = null,
-)
+) {
+  fun markError(nodeId: String) {
+    status = WorkflowInstanceStatus.ERROR
+    currentNodeId = nodeId
+  }
+
+  fun markWaitingForEvent(node: Node.WaitForEvent, now: LocalDateTime = LocalDateTime.now()) {
+    status = WorkflowInstanceStatus.WAITING
+    currentNodeId = node.id
+    waitingEventName = node.event.eventCode
+    waitingUntil = node.event.timeout?.let { now.plusNanos(it.toDuration().inWholeNanoseconds) }
+  }
+
+  fun markWaitingForDelay(node: Node.Delay, now: LocalDateTime = LocalDateTime.now()) {
+    status = WorkflowInstanceStatus.WAITING
+    currentNodeId = node.id
+    waitingUntil = now.plusNanos(node.duration.toDuration().inWholeNanoseconds)
+  }
+
+  fun markCompleted(nodeId: String, now: LocalDateTime = LocalDateTime.now()) {
+    status = WorkflowInstanceStatus.COMPLETED
+    currentNodeId = nodeId
+    completedAt = now
+  }
+}
 
 enum class WorkflowInstanceStatus { RUNNING, WAITING, COMPLETED, EXPIRED, ERROR }
 
+// 워크플로인스턴스 하위 노드들에 대한 데이터
 class WorkflowExecution(
   val id: String,
   val workflowInstanceId: String,
@@ -59,7 +86,21 @@ class WorkflowDefinition(
   val trigger: String,
   val nodes: List<Node>,
   val edges: List<Edge>,
-)
+) {
+  // runFrom의 while 루프가 정상적인(순환 없는) 워크플로에서 밟을 수 있는 최대 스텝 수보다 넉넉한 여유값.
+  // ManageWorkflowUseCase.validate()가 생성 시점에 순환을 이미 거부하므로 정상 워크플로는 각 노드를
+  // 최대 1번만 방문하지만, 검증을 뚫고 들어온 비정상 순환에 대비한 2차 방어선이다.
+  // @JsonIgnore: 파생 프로퍼티라 직렬화 대상에서 빠져야 한다 - 안 그러면 저장 시 함께 직렬화됐다가
+  // 복원 시 생성자에 없는 프로퍼티라 UnrecognizedPropertyException이 발생한다(Node.nodeType과 동일 이유).
+  @get:JsonIgnore
+  val maxExecutionSteps: Int get() = nodes.size * 4
+
+  fun nodeById(id: String): Node? = nodes.firstOrNull { it.id == id }
+
+  fun nextNodeId(from: String, route: EdgeRoute): String =
+    edges.firstOrNull { it.from == from && it.route == route }?.to
+      ?: error("노드 $from 에서 $route 로 가는 엣지가 없습니다")
+}
 
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes(
@@ -73,12 +114,31 @@ class WorkflowDefinition(
 sealed interface Node {
   val id: String
 
-  data class Trigger(override val id: String, val eventCode: String) : Node
-  data class Condition(override val id: String, val condition: ConditionExpression) : Node
-  data class Action(override val id: String, val action: ActionDefinition) : Node
-  data class WaitForEvent(override val id: String, val event: WaitEventDefinition) : Node
-  data class Delay(override val id: String, val duration: DurationDto) : Node
-  data class End(override val id: String) : Node
+  // JsonTypeInfo가 이미 "type" 프로퍼티를 직렬화 메타데이터로 쓰고 있어(클래스 -> TRIGGER/CONDITION/...
+  // 이름 매핑) 이름 충돌을 피하려고 "nodeType"으로 둔다. @JsonIgnore로 이 파생 프로퍼티 자체가
+  // JSON 직렬화/역직렬화 대상에 포함되지 않게 한다 - 안 그러면 저장 시 nodeType 필드가 함께
+  // 직렬화됐다가, 복원 시 생성자에 없는 프로퍼티라 UnrecognizedPropertyException이 발생한다.
+  @get:JsonIgnore
+  val nodeType: NodeType
+
+  data class Trigger(override val id: String, val eventCode: String) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.TRIGGER
+  }
+  data class Condition(override val id: String, val condition: ConditionExpression) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.CONDITION
+  }
+  data class Action(override val id: String, val action: ActionDefinition) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.ACTION
+  }
+  data class WaitForEvent(override val id: String, val event: WaitEventDefinition) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.WAIT_FOR_EVENT
+  }
+  data class Delay(override val id: String, val duration: DurationDto) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.DELAY
+  }
+  data class End(override val id: String) : Node {
+    @get:JsonIgnore override val nodeType get() = NodeType.END
+  }
 }
 
 data class DurationDto(val value: Long, val unit: DurationUnit) {

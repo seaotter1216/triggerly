@@ -37,6 +37,7 @@ dependencies {
 	// 여기서도 명시적으로 추가한다.
 	implementation(libs.spring.boot.starter.data.jpa)
 	implementation(libs.spring.boot.starter.data.elasticsearch)
+	implementation(libs.spring.boot.starter.data.redis)
 
 	// triggerly-adapter-in-web이 spring-boot-starter-web을 implementation(비공개)으로 물고 있어,
 	// 이를 implementation으로 의존하는 triggerly-bootstrap의 테스트 소스셋에는 전이적으로 노출되지

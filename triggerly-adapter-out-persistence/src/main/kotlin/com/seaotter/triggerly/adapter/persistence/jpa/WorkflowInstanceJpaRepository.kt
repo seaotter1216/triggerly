@@ -5,7 +5,8 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.time.LocalDateTime
 
 interface WorkflowInstanceJpaRepository : JpaRepository<WorkflowInstanceEntity, String> {
-  fun findAllByStatusAndWaitingUntilLessThanEqual(
+  fun findAllByTenantIdAndStatusAndWaitingUntilLessThanEqualOrderByWaitingUntilAsc(
+    tenantId: String,
     status: String,
     waitingUntil: LocalDateTime,
     pageable: Pageable,
