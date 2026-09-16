@@ -45,5 +45,8 @@ out/
 ### Worktrees ###
 .worktrees/
 
+### Claude ###
+.claude/
+
 ### Build logs ###
 *.log
