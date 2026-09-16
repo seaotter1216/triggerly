@@ -35,4 +35,23 @@ class WorkflowPersistenceAdapterTest : MySqlIntegrationTest() {
     assertEquals(1, enabled.size)
     assertEquals("wf-2", enabled[0].id)
   }
+
+  @Test
+  fun `findDistinctTenantIds는 워크플로가 존재하는 테넌트를 중복 없이 반환한다`() {
+    val tenantA = "t-distinct-a-${System.nanoTime()}"
+    val tenantB = "t-distinct-b-${System.nanoTime()}"
+    adapter.save(sampleWorkflow("wf-distinct-1", WorkflowStatus.ENABLED).let {
+      Workflow(id = it.id, tenantId = tenantA, triggerEventCode = it.triggerEventCode, definitionJson = it.definitionJson, status = it.status, createdAt = it.createdAt, lastUpdatedAt = it.lastUpdatedAt)
+    })
+    adapter.save(sampleWorkflow("wf-distinct-2", WorkflowStatus.DRAFT).let {
+      Workflow(id = it.id, tenantId = tenantA, triggerEventCode = it.triggerEventCode, definitionJson = it.definitionJson, status = it.status, createdAt = it.createdAt, lastUpdatedAt = it.lastUpdatedAt)
+    })
+    adapter.save(sampleWorkflow("wf-distinct-3", WorkflowStatus.ENABLED).let {
+      Workflow(id = it.id, tenantId = tenantB, triggerEventCode = it.triggerEventCode, definitionJson = it.definitionJson, status = it.status, createdAt = it.createdAt, lastUpdatedAt = it.lastUpdatedAt)
+    })
+
+    val result = adapter.findDistinctTenantIds()
+
+    assertTrue(result.containsAll(setOf(tenantA, tenantB)))
+  }
 }

@@ -18,6 +18,8 @@ class WorkflowPersistenceAdapter(private val repository: WorkflowJpaRepository) 
   override fun findEnabledByTriggerEventCode(tenantId: String, eventCode: String): List<Workflow> =
     repository.findAllByTenantIdAndTriggerEventCodeAndStatus(tenantId, eventCode, WorkflowStatus.ENABLED.name).map { it.toDomain() }
 
+  override fun findDistinctTenantIds(): Set<String> = repository.findDistinctTenantIds()
+
   private fun Workflow.toEntity() = WorkflowEntity(
     id = id, tenantId = tenantId, name = name, triggerEventCode = triggerEventCode,
     definitionJson = definitionJson, version = version, status = status.name,
