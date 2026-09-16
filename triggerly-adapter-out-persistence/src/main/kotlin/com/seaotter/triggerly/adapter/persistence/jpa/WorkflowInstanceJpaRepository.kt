@@ -10,4 +10,11 @@ interface WorkflowInstanceJpaRepository : JpaRepository<WorkflowInstanceEntity, 
     waitingUntil: LocalDateTime,
     pageable: Pageable,
   ): List<WorkflowInstanceEntity>
+
+  fun findAllByTenantIdAndStatusAndWaitingUntilLessThanEqualOrderByWaitingUntilAsc(
+    tenantId: String,
+    status: String,
+    waitingUntil: LocalDateTime,
+    pageable: Pageable,
+  ): List<WorkflowInstanceEntity>
 }
