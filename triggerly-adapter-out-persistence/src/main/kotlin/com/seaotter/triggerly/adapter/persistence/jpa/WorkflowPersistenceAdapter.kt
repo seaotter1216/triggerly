@@ -20,6 +20,12 @@ class WorkflowPersistenceAdapter(private val repository: WorkflowJpaRepository) 
 
   override fun findDistinctTenantIds(): Set<String> = repository.findDistinctTenantIds()
 
+  override fun deleteById(tenantId: String, id: String): Boolean {
+    val entity = repository.findByIdAndTenantId(id, tenantId) ?: return false
+    repository.delete(entity)
+    return true
+  }
+
   private fun Workflow.toEntity() = WorkflowEntity(
     id = id, tenantId = tenantId, name = name, triggerEventCode = triggerEventCode,
     definitionJson = definitionJson, version = version, status = status.name,

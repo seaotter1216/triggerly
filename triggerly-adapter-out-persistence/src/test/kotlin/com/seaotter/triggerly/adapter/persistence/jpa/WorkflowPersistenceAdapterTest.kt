@@ -54,4 +54,29 @@ class WorkflowPersistenceAdapterTest : MySqlIntegrationTest() {
 
     assertTrue(result.containsAll(setOf(tenantA, tenantB)))
   }
+
+  @Test
+  fun `deleteById는 삭제에 성공하면 true를 반환하고 실제로 지운다`() {
+    adapter.save(sampleWorkflow("wf-delete-1", WorkflowStatus.DRAFT))
+
+    val result = adapter.deleteById("t1", "wf-delete-1")
+
+    assertTrue(result)
+    assertEquals(null, adapter.findById("t1", "wf-delete-1"))
+  }
+
+  @Test
+  fun `deleteById는 존재하지 않으면 false를 반환한다`() {
+    assertEquals(false, adapter.deleteById("t1", "wf-does-not-exist"))
+  }
+
+  @Test
+  fun `deleteById는 다른 테넌트 id로 요청하면 지우지 않고 false를 반환한다`() {
+    adapter.save(sampleWorkflow("wf-delete-2", WorkflowStatus.DRAFT))
+
+    val result = adapter.deleteById("other-tenant", "wf-delete-2")
+
+    assertEquals(false, result)
+    assertTrue(adapter.findById("t1", "wf-delete-2") != null)
+  }
 }

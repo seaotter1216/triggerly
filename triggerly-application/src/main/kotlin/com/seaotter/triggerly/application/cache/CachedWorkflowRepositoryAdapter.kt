@@ -42,6 +42,10 @@ class CachedWorkflowRepositoryAdapter(
 
   override fun findDistinctTenantIds(): Set<String> = tenantIdsCache.get(TENANT_IDS_KEY) { delegate.findDistinctTenantIds() }
 
+  // 쓰기 경로라 캐싱하지 않는다. 캐시 무효화는 ManageWorkflowUseCase가 삭제 성공 후 발행하는
+  // CacheInvalidationPort.publish(WORKFLOW, ...)가 evict()를 통해 처리한다(save/enable과 동일한 경로).
+  override fun deleteById(tenantId: String, id: String): Boolean = delegate.deleteById(tenantId, id)
+
   fun evict(tenantId: String, workflowId: String) {
     byIdCache.invalidate(idKey(tenantId, workflowId))
     // 워크플로 하나가 바뀌면 그게 어떤 triggerEventCode에 걸려 있었는지 이 클래스는 알 수 없으므로(evict

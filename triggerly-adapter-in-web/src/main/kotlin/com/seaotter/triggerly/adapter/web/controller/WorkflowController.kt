@@ -22,4 +22,8 @@ class WorkflowController(private val useCase: ManageWorkflowUseCase) {
 
   @PostMapping("/{id}/enable")
   fun enable(@RequestParam tenantId: String, @PathVariable id: String): Workflow = useCase.enable(tenantId, id)
+
+  @DeleteMapping("/{id}")
+  fun delete(@RequestParam tenantId: String, @PathVariable id: String): ResponseEntity<Void> =
+    if (useCase.delete(tenantId, id)) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()
 }

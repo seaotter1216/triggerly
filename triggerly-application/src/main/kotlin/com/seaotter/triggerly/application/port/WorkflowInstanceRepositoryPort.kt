@@ -14,4 +14,7 @@ interface WorkflowInstanceRepositoryPort {
   // TenantAwareTimeoutPoller(Task 9)가 테넌트별로 소량씩만 조회하기 위한 메서드. 전역 findWaitingExpired와
   // 달리 tenant_id를 필터에 포함해 (tenant_id, status, waiting_until) 인덱스를 그대로 타게 한다.
   fun findWaitingExpiredByTenant(tenantId: String, now: LocalDateTime, limit: Int): List<WorkflowInstance>
+
+  // 관리자 UI(인스턴스 탐색 탭)가 id를 모르는 상태에서 테넌트 기준으로 최근 인스턴스를 훑어보기 위한 메서드.
+  fun findByTenant(tenantId: String, limit: Int): List<WorkflowInstance>
 }

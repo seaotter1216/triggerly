@@ -26,6 +26,9 @@ class WorkflowInstancePersistenceAdapter(
       tenantId, WorkflowInstanceStatus.WAITING.name, now, PageRequest.of(0, limit),
     ).map { it.toDomain() }
 
+  override fun findByTenant(tenantId: String, limit: Int): List<WorkflowInstance> =
+    repository.findAllByTenantIdOrderByStartedAtDesc(tenantId, PageRequest.of(0, limit)).map { it.toDomain() }
+
   private fun WorkflowInstance.toEntity() = WorkflowInstanceEntity(
     id = id, workflowId = workflowId, tenantId = tenantId, triggerEventCode = triggerEventCode, version = version,
     memberId = memberId, status = status.name, currentNodeId = currentNodeId, waitingEventName = waitingEventName,

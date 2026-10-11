@@ -62,4 +62,31 @@ class WorkflowInstancePersistenceAdapterTest : MySqlIntegrationTest() {
 
     assertEquals(listOf(older.id, newer.id), result.map { it.id })
   }
+
+  @Test
+  fun `findByTenant는 해당 테넌트의 인스턴스만 startedAt 내림차순으로 반환한다`() {
+    val tenantId = "t-browse-${System.nanoTime()}"
+    val older = adapter.save(
+      WorkflowInstance(
+        id = UUID.randomUUID().toString(), workflowId = "wf-1", tenantId = tenantId, triggerEventCode = "CART_ADD",
+        version = 1, status = WorkflowInstanceStatus.RUNNING, startedAt = LocalDateTime.now().minusMinutes(5),
+      ),
+    )
+    val newer = adapter.save(
+      WorkflowInstance(
+        id = UUID.randomUUID().toString(), workflowId = "wf-1", tenantId = tenantId, triggerEventCode = "CART_ADD",
+        version = 1, status = WorkflowInstanceStatus.RUNNING, startedAt = LocalDateTime.now().minusMinutes(1),
+      ),
+    )
+    adapter.save(
+      WorkflowInstance(
+        id = UUID.randomUUID().toString(), workflowId = "wf-1", tenantId = "other-tenant", triggerEventCode = "CART_ADD",
+        version = 1, status = WorkflowInstanceStatus.RUNNING, startedAt = LocalDateTime.now(),
+      ),
+    )
+
+    val result = adapter.findByTenant(tenantId, limit = 10)
+
+    assertEquals(listOf(newer.id, older.id), result.map { it.id })
+  }
 }

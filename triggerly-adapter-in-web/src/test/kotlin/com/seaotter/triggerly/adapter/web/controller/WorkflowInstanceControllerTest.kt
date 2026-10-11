@@ -34,4 +34,17 @@ class WorkflowInstanceControllerTest {
 
     assertEquals(HttpStatus.NOT_FOUND, controller.get("unknown").statusCode)
   }
+
+  @Test
+  fun `목록 조회는 tenantId와 workflowId를 그대로 유스케이스에 위임한다`() {
+    val instance = WorkflowInstance(
+      id = "i1", workflowId = "wf-1", tenantId = "t1", triggerEventCode = "LOGIN",
+      version = 1, status = WorkflowInstanceStatus.RUNNING,
+    )
+    every { useCase.list("t1", "wf-1") } returns listOf(instance)
+
+    val result = controller.list("t1", "wf-1")
+
+    assertEquals(listOf(instance), result)
+  }
 }

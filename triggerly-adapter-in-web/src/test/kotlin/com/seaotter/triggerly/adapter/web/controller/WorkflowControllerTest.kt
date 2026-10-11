@@ -49,4 +49,18 @@ class WorkflowControllerTest {
 
     assertEquals(WorkflowStatus.ENABLED, result.status)
   }
+
+  @Test
+  fun `delete는 성공하면 204를 반환한다`() {
+    every { useCase.delete("t1", "wf-1") } returns true
+
+    assertEquals(HttpStatus.NO_CONTENT, controller.delete("t1", "wf-1").statusCode)
+  }
+
+  @Test
+  fun `delete는 없는 워크플로면 404를 반환한다`() {
+    every { useCase.delete("t1", "unknown") } returns false
+
+    assertEquals(HttpStatus.NOT_FOUND, controller.delete("t1", "unknown").statusCode)
+  }
 }

@@ -107,4 +107,28 @@ class ManageWorkflowUseCaseTest {
 
     verify(exactly = 1) { cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "t1:wf-1") }
   }
+
+  @Test
+  fun `delete는 성공 시 true를 반환하고 WORKFLOW 캐시 무효화를 발행한다`() {
+    val port = mockk<WorkflowRepositoryPort>()
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    every { port.deleteById("t1", "wf-1") } returns true
+
+    val result = ManageWorkflowUseCase(port, cacheInvalidationPort).delete("t1", "wf-1")
+
+    assertEquals(true, result)
+    verify(exactly = 1) { cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "t1:wf-1") }
+  }
+
+  @Test
+  fun `delete는 존재하지 않으면 false를 반환하고 캐시 무효화를 발행하지 않는다`() {
+    val port = mockk<WorkflowRepositoryPort>()
+    val cacheInvalidationPort = mockk<CacheInvalidationPort>(relaxed = true)
+    every { port.deleteById("t1", "unknown") } returns false
+
+    val result = ManageWorkflowUseCase(port, cacheInvalidationPort).delete("t1", "unknown")
+
+    assertEquals(false, result)
+    verify(exactly = 0) { cacheInvalidationPort.publish(any(), any()) }
+  }
 }

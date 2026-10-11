@@ -22,6 +22,8 @@ private class FakeWorkflowInstanceRepository : WorkflowInstanceRepositoryPort {
   override fun findWaitingExpiredByTenant(tenantId: String, now: LocalDateTime, limit: Int) =
     store.values.filter { it.tenantId == tenantId && it.status == WorkflowInstanceStatus.WAITING && it.waitingUntil?.isAfter(now) == false }
       .take(limit)
+  override fun findByTenant(tenantId: String, limit: Int) =
+    store.values.filter { it.tenantId == tenantId }.take(limit)
 }
 
 private class FakeWorkflowExecutionRepository : WorkflowExecutionRepositoryPort {

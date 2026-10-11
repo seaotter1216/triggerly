@@ -33,6 +33,12 @@ class ManageWorkflowUseCase(
     return saved
   }
 
+  fun delete(tenantId: String, id: String): Boolean {
+    val deleted = port.deleteById(tenantId, id)
+    if (deleted) cacheInvalidationPort.publish(CacheInvalidationTopic.WORKFLOW, "$tenantId:$id")
+    return deleted
+  }
+
   private fun validate(definition: WorkflowDefinition) {
     val nodeIds = definition.nodes.map { it.id }.toSet()
     definition.edges.forEach { edge ->
