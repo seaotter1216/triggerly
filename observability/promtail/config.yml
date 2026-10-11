@@ -16,3 +16,13 @@ scrape_configs:
         labels:
           job: triggerly-claude
           __path__: /var/log/triggerly/*.log
+    # 이게 없으면 Promtail이 "읽은 시각"을 타임스탬프로 찍어버려서, 컨테이너 재시작 직후 하루치 로그를
+    # 한꺼번에 다시 읽을 때 서로 다른 시각에 실제로 발생한 로그들이 전부 "방금"으로 보인다(2026-10-11
+    # 실측: 1시간 넘게 차이나는 두 DEMO ACTION 로그가 같은 시각에 들어온 것처럼 보임). 로그 줄 맨 앞의
+    # ISO-8601 타임스탬프(예: 2026-10-11T04:22:12.369+09:00)를 파싱해서 실제 발생 시각으로 쓴다.
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\S+)\s+(?P<level>\w+)\s+(?P<pid>\d+)'
+      - timestamp:
+          source: timestamp
+          format: "2006-01-02T15:04:05.000Z07:00"
